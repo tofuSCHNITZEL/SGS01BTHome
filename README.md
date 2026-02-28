@@ -57,8 +57,8 @@ Note: When flashing the custom BTHome firmware, the sensor won't work with the T
     *Sensor SWS - TTL RxTx*
     *Sensor Reset - TTL Rts*
 
-- Note: If the sensor firmware was updated by OTA, erase flash sectors 0x00000 - 0x3FFFF. DO NOT erase flash sectors above 0x70000, here is the manufactor pre-programmed area (MAC address and chip calibration data).    
-- May read out the original firmware (first 128k) before flashing.
+- Note: If the sensor firmware was updated by OTA, erase flash range 0x00000 - 0x3FFFF. DO NOT erase flash above 0x70000, here is the manufactor pre-programmed area (MAC address and chip calibration data).    
+- May read out the original firmware (first 128k bytes) before flashing.
 - Firmware files are located in the subdirectory **/fw**.
 - Flash the xxx.bin at start address 0x00000.    
 

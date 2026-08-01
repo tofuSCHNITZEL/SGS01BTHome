@@ -47,7 +47,7 @@ Note: When flashing the custom BTHome firmware, the sensor won't work with the T
     *Sensor Gnd - BDT GND*
     *Sensor SWS - BDT SWM*
 
-  Select chip type 8258 to flash.
+  Select chip type B85 to flash.
 - PVVX
   [TlsrComSwireWriter](https://github.com/pvvx/TlsrComSwireWriter ""):
   Flashing by "USB/TTL adapter" and PVVX python script.

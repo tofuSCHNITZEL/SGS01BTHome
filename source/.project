@@ -148,7 +148,7 @@
 		<link>
 			<name>src_sdk/drivers_8258/analog.c</name>
 			<type>1</type>
-			<location>C:/Appelt/Projekte/BLEGateway/SGS01/b85_ble_sdk/drivers/8258/analog.c</location>
+			<location>SDK_LOC/drivers/8258/analog.c</location>
 		</link>
 		<link>
 			<name>src_sdk/drivers_8258/clock.c</name>

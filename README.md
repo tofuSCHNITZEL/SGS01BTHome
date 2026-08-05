@@ -3,6 +3,10 @@ Custom firmware for the Tuya SGS01 soil sensor to send data in standard BTHome f
 
 Project status:	23.08.2025 started alpha test with 4 devices
 
+**NOTE:** 
+Since 2026 there is a new sensor version "SGS01B" with a BTH module in the market.
+The new version is currently not supported.
+
 
 ## Sensor
 

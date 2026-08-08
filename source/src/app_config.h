@@ -104,7 +104,7 @@
 // UART Serial
 #define UART_TX_PIN		UART_TX_PB1
 #define UART_RX_PIN		UART_RX_PB7
-#define UART_BAUDRATE	115200 // SGS01v2 MCU runs at 115200 baudrate
+#define UART_BAUDRATE	115200 // SGS01v1.1 MCU runs at 115200 baudrate
 
 // Idle/WakeUp Pins
 #define MODULE_WAKEUP_PIN	GPIO_PB5 // high to wake up module to receive notifications

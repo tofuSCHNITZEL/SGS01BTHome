@@ -51,7 +51,6 @@
 #ifndef MCU_TX_RESPONSE_DELAY
 #define MCU_TX_RESPONSE_DELAY	200		// 0.2 ms
 #endif
-// #define MCU_RX_BYTE_TIMEOUT     2000	// 2 ms (9600 baud)
 #ifndef MCU_TXRX_PACKET_TIMEOUT
 #define MCU_TXRX_PACKET_TIMEOUT	160000	// 160 ms
 #endif

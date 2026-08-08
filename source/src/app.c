@@ -64,10 +64,10 @@ static u32 app_state_clock = 0;
 #define APP_MCU_STATE_REFRESH_SEC 50
 static u32 app_mcustate_time = 0;
 
-enum { DEVICETYPE_None=0, DEVICETYPE_Unknown, DEVICETYPE_SGS01, DEVICETYPE_SGS01v2 };
+enum { DEVICETYPE_None=0, DEVICETYPE_Unknown, DEVICETYPE_SGS01, DEVICETYPE_SGS01v1_1 };
 static _attribute_data_retention_ u8 app_device_type = DEVICETYPE_None;
 #if (APP_LOG_EN)
-static const char *dbg_device_type_name[]={"", "<unknown>", "SGS01"};
+static const char *dbg_device_type_name[]={"", "<unknown>", "SGS01", "SGS01v1.1"};
 #endif
 
 //
@@ -408,7 +408,7 @@ static void app_handle_user_button(int val)
 //
 
 static const u8 pid_sgs01[8]={'g','v','y','g','g','3','m','8'};
-static const u8 pid_sgs01v2[8]={'g','p','k','y','r','o','c','n'};
+static const u8 pid_sgs01v1_1[8]={'g','p','k','y','r','o','c','n'};
 
 enum {
 	DPTYPE_RAW=0,		// datalen 1...255
@@ -510,17 +510,17 @@ void app_notify(u8 evt, const u8 *data, u16 datalen)
 		{
 			u8 device_type=DEVICETYPE_Unknown;
 			if (memcmp(data,pid_sgs01,8) == 0)	device_type=DEVICETYPE_SGS01;
-			if (memcmp(data,pid_sgs01v2,8) == 0)	device_type=DEVICETYPE_SGS01v2;
+			if (memcmp(data,pid_sgs01v1_1,8) == 0)	device_type=DEVICETYPE_SGS01v1_1;
 		    DEBUGFMT(APP_LOG_EN, "|APP] Device type %s", dbg_device_type_name[device_type]);
 		    if (device_type==DEVICETYPE_SGS01)   app_ble_init_device_name("SGS01");
-			if (device_type==DEVICETYPE_SGS01v2)   app_ble_init_device_name("SGS01");
+			if (device_type==DEVICETYPE_SGS01v1_1)   app_ble_init_device_name("SGS01");
 			app_device_type=device_type;
 		} break;
 		case APP_NOTIFY_DPDATA:
 			#if (APP_DPDATA_LOG_EN)
 			DEBUG_DPDATA(data, datalen);
 			#endif
-			if (app_device_type == DEVICETYPE_SGS01 || app_device_type == DEVICETYPE_SGS01v2)
+			if (app_device_type == DEVICETYPE_SGS01 || app_device_type == DEVICETYPE_SGS01v1_1)
 				set_dp_data(sgs01_dp_def, data, datalen);
 			app_data_time_sec=app_sec_time();
 		    break;

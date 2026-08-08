@@ -22,8 +22,7 @@
 
 //
 // notes:
-//  - in current version we use polling the UART fifo
-//    since the protocol is only running at 9600 baud
+//  - uses UART DMA mode for TX and RX
 //
 
 #if (APP_MCU_SERIAL)  // component enabled
@@ -32,6 +31,7 @@
 #include "string.h"
 #include "timer.h"
 #include "uart.h"
+#include "dma.h"
 #include "lib/include/pm.h"
 #include "stack/ble/ble.h"
 
@@ -144,6 +144,17 @@ static _attribute_data_retention_ u8 mcu_tx_buf_out = 0;
 static _attribute_data_retention_ mcu_buf_t mcu_tx_buf[TXBUF_CNT];
 static _attribute_data_retention_ mcu_buf_t mcu_rx_buf;
 
+// DMA buffers
+// TX: 4-byte dma_len header required by DMA engine, followed by packet data
+#define MCU_DMA_TX_DATA_SIZE  (MCU_PACKET_HDRLEN + MCU_PACKET_MAXDATA)
+typedef struct { u32 dma_len; u8 data[MCU_DMA_TX_DATA_SIZE]; } _attribute_aligned_(4) mcu_dma_tx_t;
+// RX: total size must be a multiple of 16; 4-byte dma_len + 60 bytes data = 64 bytes
+#define MCU_DMA_RX_BUF_SIZE   64
+#define MCU_DMA_RX_DATA_SIZE  (MCU_DMA_RX_BUF_SIZE - 4)
+typedef struct { u32 dma_len; u8 data[MCU_DMA_RX_DATA_SIZE]; } _attribute_aligned_(4) mcu_dma_rx_t;
+static _attribute_data_retention_ mcu_dma_tx_t mcu_dma_tx;
+static _attribute_data_retention_ mcu_dma_rx_t mcu_dma_rx;
+
 //
 // packet CRC calculation
 //
@@ -184,33 +195,20 @@ static u32 mcu_pad_wakeup_time = 0;
 
 static void mcu_uart_init(void)
 {   // init normal and DeepRetn
+	// recbuff_init must come before uart_reset (Telink SDK requirement)
+	mcu_dma_rx.dma_len = 0;
+	uart_recbuff_init((u8*)&mcu_dma_rx, sizeof(mcu_dma_rx));
 	uart_gpio_set(UART_TX_PIN, UART_RX_PIN);
-	uart_reset(); // reset all UART registers
-	uart_ndma_clear_tx_index(); uart_ndma_clear_rx_index();
+	uart_reset();
 	uart_init_baudrate(UART_BAUDRATE, CLOCK_SYS_CLOCK_HZ, PARITY_NONE, STOP_BIT_ONE);
-	uart_irq_enable(0, 0); // disable
+	uart_dma_enable(1, 1);
+	uart_irq_enable(0, 0);
 	mcu_uart_initialized = 1;
 }
 
 static u8 inline get_tx_isbusy(void)
 {
 	return uart_tx_is_busy();
-}
-static u8 inline get_tx_fifo_cnt(void)
-{
-	return (reg_uart_buf_cnt >> 4);
-}
-static u8 inline get_rx_fifo_cnt(void)
-{
-	return (reg_uart_buf_cnt & 0x0F);
-}
-static void inline push_tx_fifo(u8 b)
-{
-	uart_ndma_send_byte(b);
-}
-static u8 inline pop_rx_fifo(void)
-{
-	return uart_ndma_read_byte();
 }
 
 void mcu_wakeup_init(void)
@@ -231,8 +229,7 @@ void mcu_wakeup_init(void)
 
 _attribute_ram_code_ void mcu_wakeup_init_deepRetn(void)
 {
-	uart_ndma_clear_tx_index(); // must
-	uart_ndma_clear_rx_index();
+	mcu_dma_rx.dma_len = 0; // discard any stale DMA data; full re-arm in mcu_uart_init()
 	gpio_set_input_en(MODULE_WAKEUP_PIN, 1);
 	cpu_set_gpio_wakeup(MODULE_WAKEUP_PIN, Level_High, 1);
 }
@@ -348,19 +345,15 @@ _attribute_optimize_size_ static u8 mcu_handle_send(void)
 			if (buf->ptype == PTYPE_CMD)   delay=MCU_TX_WAKEUP_DELAY;
 			if (buf->ptype == PTYPE_RESP)   delay=MCU_TX_RESPONSE_DELAY;
 			if (delay && !clock_time_exceed(buf->clocktime,delay))    return 1; // busy
-			buf->pstate=PSTATE_DATA; // send delay processed
-		}
-		while (buf->pstate == PSTATE_DATA)
-		{
-			if (buf->dataofs >= buf->datalen) { buf->pstate++; break; } // all data done
-			if (get_tx_fifo_cnt()>7)    return 1;  // TX FIFO busy
-			push_tx_fifo( buf->data[buf->dataofs] );
-			buf->dataofs++;
+			// copy packet to DMA TX buffer and trigger DMA send
+			mcu_dma_tx.dma_len = buf->datalen;
+			memcpy(mcu_dma_tx.data, buf->data, buf->datalen);
+			uart_send_dma((u8*)&mcu_dma_tx);
+			buf->pstate = PSTATE_DONE;
 		}
 		if (buf->pstate == PSTATE_DONE)
 		{
-			if (get_tx_fifo_cnt()>0)    return 1;  // wait for fifo send
-			if (get_tx_isbusy()>0)    return 1;  // wait for all data send
+			if (get_tx_isbusy())    return 1;  // wait for DMA TX to complete
 			if (buf->ptype == PTYPE_CMD)
 				mcu_wakeup_end();
 			rxtx_notify(RXTX_EVT_SEND, 0, buf_data_packet(buf));
@@ -378,51 +371,79 @@ static inline u8 mcu_tx_busy(void)
 
 _attribute_optimize_size_ static u8 mcu_handle_receive(u8 irq)
 {
-	mcu_buf_t *buf=&mcu_rx_buf; // only one rx buffer
-	// Check for MCU notifications in idle state
-	if (buf->bstate == BSTATE_IDLE)
-    {
-		if (get_rx_fifo_cnt()==0)    return 0;  // nothing to receive
-		// start receive packet
-		buf->datalen = 0; buf->dataofs = 0;
-		buf->clocktime = clock_time();
-		buf->pstate = PSTATE_DATA; buf->perror = PERROR_NONE;
-		buf->bstate = BSTATE_PROCESS;
-    }
+	mcu_buf_t *buf=&mcu_rx_buf;
+
+	// Append any newly DMA-received bytes into the assembly buffer
+	if (mcu_dma_rx.dma_len > 0)
+	{
+		if (buf->bstate == BSTATE_IDLE)
+		{
+			buf->dataofs = 0; buf->datalen = 0;
+			buf->clocktime = clock_time();
+			buf->pstate = PSTATE_DATA; buf->perror = PERROR_NONE;
+			buf->bstate = BSTATE_PROCESS;
+		}
+		if (buf->bstate == BSTATE_PROCESS)
+		{
+			u16 avail = (u16)mcu_dma_rx.dma_len;
+			u16 space = (u16)sizeof(buf->data) - buf->dataofs;
+			u16 copy = (avail < space) ? avail : space;
+			memcpy(buf->data + buf->dataofs, mcu_dma_rx.data, copy);
+			buf->dataofs += copy;
+			buf->datalen = buf->dataofs;
+			buf->clocktime = clock_time();
+		}
+		mcu_dma_rx.dma_len = 0;
+	}
+
+	if (buf->bstate == BSTATE_IDLE)   return 0;
+
+	// Parse assembled bytes into a complete packet (handles split DMA receptions)
 	while (buf->bstate == BSTATE_PROCESS && buf->pstate == PSTATE_DATA)
 	{
-		if (get_rx_fifo_cnt() == 0)
+		if (buf->datalen == 0)
 		{
-			if (!clock_time_exceed(buf->clocktime,MCU_TXRX_PACKET_TIMEOUT))    return 1; // wait for next byte
+			if (!clock_time_exceed(buf->clocktime, MCU_TXRX_PACKET_TIMEOUT))   return 1;
 			buf->bstate = BSTATE_ERROR; buf->perror = PERROR_TIMEOUT;
 			break;
 		}
-		u8 b=pop_rx_fifo();
-		if (buf->dataofs < sizeof(buf->data))
-			buf->data[buf->dataofs++]=b;
-		buf->datalen++; buf->clocktime=clock_time();
-		// pre check packet data
 		mcu_packet_t *pkt=buf_data_packet(buf);
-		if ((buf->datalen==1 && pkt->header1!=0x55) ||
-			(buf->datalen==2 && pkt->header2!=0xAA))
+		if ((buf->datalen >= 1 && pkt->header1 != 0x55) ||
+			(buf->datalen >= 2 && pkt->header2 != 0xAA))
 		{
-			buf->datalen = 0; buf->dataofs = 0; // restart rx
+			buf->datalen = 0; buf->dataofs = 0; // discard bad header, restart
+			if (!clock_time_exceed(buf->clocktime, MCU_TXRX_PACKET_TIMEOUT))   return 1;
+			buf->bstate = BSTATE_ERROR; buf->perror = PERROR_FORMAT;
+			break;
 		}
-		if (buf->datalen > MCU_PACKET_HDRLEN)
+		if (buf->datalen < MCU_PACKET_HDRLEN)
 		{
-			u16 pktdatalen=packet_datalen(pkt);
-			if (pktdatalen > 500)
-			{
-				buf->bstate = BSTATE_ERROR; buf->perror = PERROR_FORMAT;
-			}
-			else if (buf->datalen==MCU_PACKET_HDRLEN+pktdatalen+1)
-				buf->pstate = PSTATE_DONE; // header+data+crc done
+			if (!clock_time_exceed(buf->clocktime, MCU_TXRX_PACKET_TIMEOUT))   return 1;
+			buf->bstate = BSTATE_ERROR; buf->perror = PERROR_TIMEOUT;
+			break;
 		}
+		u16 pktdatalen=packet_datalen(pkt);
+		if (pktdatalen > 500)
+		{
+			buf->bstate = BSTATE_ERROR; buf->perror = PERROR_FORMAT;
+			break;
+		}
+		u16 expected = MCU_PACKET_HDRLEN + pktdatalen + MCU_PACKET_CRCLEN;
+		if (buf->datalen < expected)
+		{
+			if (!clock_time_exceed(buf->clocktime, MCU_TXRX_PACKET_TIMEOUT))   return 1;
+			buf->bstate = BSTATE_ERROR; buf->perror = PERROR_TIMEOUT;
+			break;
+		}
+		buf->datalen = expected;
+		buf->pstate = PSTATE_DONE;
+		break;
 	}
+
 	if (buf->bstate == BSTATE_PROCESS && buf->pstate == PSTATE_DONE && !irq)
 	{
-		u8 ret=0; mcu_packet_t *pkt=buf_data_packet(buf);
-		if (buf->datalen > MCU_PACKET_HDRLEN+MCU_PACKET_MAXDATA)
+		mcu_packet_t *pkt=buf_data_packet(buf);
+		if (buf->datalen > MCU_PACKET_HDRLEN + MCU_PACKET_MAXDATA)
 		{
 			buf->bstate = BSTATE_ERROR; buf->perror = PERROR_SIZE;
 		}
@@ -430,14 +451,13 @@ _attribute_optimize_size_ static u8 mcu_handle_receive(u8 irq)
 		{
 			buf->bstate = BSTATE_ERROR; buf->perror = PERROR_CRC;
 		}
-	    else
-	    {
-	        // DEBUGHEXBUF(APP_SERIAL_LOG_EN, "[MCU] < %s", buf->data, buf->datalen);
-	    	MCU_DEBUG_PACKET("[MCU]", 0, buf->data, buf->datalen);
-	    	ret=rxtx_notify(RXTX_EVT_RECV, 0, pkt);
-			buf->bstate = BSTATE_IDLE; buf->pstate = PSTATE_NONE;
-	    }
-		return ret;
+		else
+		{
+			MCU_DEBUG_PACKET("[MCU]", 0, buf->data, buf->datalen);
+			u8 ret=rxtx_notify(RXTX_EVT_RECV, 0, pkt);
+			buf->bstate=BSTATE_IDLE;
+			return ret;
+		}
 	}
 	if (buf->bstate == BSTATE_ERROR && !irq)
 	{
@@ -448,7 +468,7 @@ _attribute_optimize_size_ static u8 mcu_handle_receive(u8 irq)
 		buf->bstate = BSTATE_IDLE;
 		return rxtx_notify(RXTX_EVT_RECV, perror, 0);
 	}
-	return 0;
+	return (buf->bstate == BSTATE_PROCESS) ? 1 : 0;
 }
 
 static inline u8 mcu_rx_busy(void)

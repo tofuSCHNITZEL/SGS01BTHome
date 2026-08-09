@@ -41,6 +41,9 @@ _attribute_ram_code_ void irq_handler(void)
 // Main function
 _attribute_ram_code_ int main(void)  // must: ramcode
 {
+	#ifdef BLE_OTA_MULTIBOOT_CONFIG
+    blc_ota_setFirmwareSizeAndBootAddress(BLE_OTA_MULTIBOOT_CONFIG); // firmware_size_k, multi_boot_addr
+	#endif
     // use internal 32k oscillator
 	blc_pm_select_internal_32k_crystal();
     // CPU init

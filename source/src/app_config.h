@@ -21,10 +21,10 @@
 #ifndef __APP_CONFIG_H__INCLUDED__
 #define __APP_CONFIG_H__INCLUDED__
 
-#define VERSION_STR "V1.0"
+#define VERSION_STR "V1.1Pre"
 
 #if defined(APP_DEBUG_ENABLE) && (APP_DEBUG_ENABLE)
-#define VERSION_STR_BUILD "debug"
+#define VERSION_STR_BUILD "Debug"
 #else
 #define VERSION_STR_BUILD ""
 #endif
@@ -32,7 +32,8 @@
 #define SENSORDATA_ADV_INTERVAL 		(ADV_INTERVAL_1S * 8)  // 8 sec, ADV mode noconn (max. 8s)
 #define SENSORDATA_CONN_ADV_INTERVAL	(ADV_INTERVAL_1S * 3)  // 3 sec, ADV mode direct
 #define BLE_CONNECTION_TIMEOUT_SEC		(4*60) // 4 min
-#define APP_MCU_DATA_TIMEOUT_SEC        (3*60) // 3 min (poll data from MCU, if not got a data notify)
+#define APP_MCU_DATA_TIMEOUT_SEC        (8*60) // mcu notify mode: poll data from MCU, if not got a data notify
+#define APP_MCU_POLL_TIME_SEC			(10)   // mcu poll mode: state "connect" time
 
 // App modules
 #define APP_BATTERY_CHECK	1   // Battery measure and check
@@ -43,9 +44,16 @@
 #define BLE_APP_PM_ENABLE				1
 #define PM_DEEPSLEEP_RETENTION_ENABLE	1
 #define BLE_APP_SECURITY_ENABLE      	1 // ACL Slave device SMP, strongly recommended enabled
-#define BLE_OTA_SERVER_ENABLE			1
-#define BLE_ATT_CUSTOMCONFIG            1 // BLE ATT "PowerLevel" "DeviceMode" "DataFormat"
+#define BLE_ATT_SGS01_CONFIG            1 // BLE ATT "PowerLevel" "DeviceMode" "DataFormat"
 #define BLE_ATT_CRYPTKEY_CHANGE_ENABLE	1 // Allow to change BTHome encryption key
+#define BLE_OTA_SERVER_ENABLE			1
+#define BLE_OTA_MULTIBOOT_CONFIG		208, 0x40000 // max. Firmware Size, Multi-Boot Address (for 512k flash)
+// #define BLE_OTA_FW_VERSION           0x0100 // uncomment to use version compare
+#define APP_MCU_POLL_ENABLE				1
+// experimental: APP_MCU_POLL_ENABLE
+// the user can set MCU poll mode by BLE attribute
+//  att value=0: simulate BLE bound+connected state, MCU notifies data changes (default, tested)
+//  att value>0: simulate BLE bound state and periodic BLE connects to read MCU data (interval time 30-3600 seconds)
 
 // RF Power Level
 #define RF_POWER_LEVEL_DEFAULT 3 // dbm
@@ -104,7 +112,9 @@
 // UART Serial
 #define UART_TX_PIN		UART_TX_PB1
 #define UART_RX_PIN		UART_RX_PB7
-#define UART_BAUDRATE	9600
+// rem.: thanks to Tobias Perschon
+// new SGS01B BTU module uses baudrate 115200
+#define UART_BAUDRATE	9600 // default
 
 // Idle/WakeUp Pins
 #define MODULE_WAKEUP_PIN	GPIO_PB5 // high to wake up module to receive notifications

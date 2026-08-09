@@ -179,6 +179,7 @@ _attribute_optimize_size_ static u8 check_packet_crc(mcu_packet_t *packet)
 //
 // target/hardware mapping
 //
+static _attribute_data_retention_ u16 mcu_uart_baudrate = UART_BAUDRATE;
 static u8 mcu_uart_initialized = 0;
 static u8 mcu_pad_wakeup = 0;
 static u32 mcu_pad_wakeup_time = 0;
@@ -188,7 +189,7 @@ static void mcu_uart_init(void)
 	uart_gpio_set(UART_TX_PIN, UART_RX_PIN);
 	uart_reset(); // reset all UART registers
 	uart_ndma_clear_tx_index(); uart_ndma_clear_rx_index();
-	uart_init_baudrate(UART_BAUDRATE, CLOCK_SYS_CLOCK_HZ, PARITY_NONE, STOP_BIT_ONE);
+	uart_init_baudrate(mcu_uart_baudrate, CLOCK_SYS_CLOCK_HZ, PARITY_NONE, STOP_BIT_ONE);
 	uart_irq_enable(0, 0); // disable
 	mcu_uart_initialized = 1;
 }
@@ -300,7 +301,6 @@ _attribute_optimize_size_ int mcu_send(u8 ptype, u8 cmd, u8 datalen, const u8* d
     if (datalen>0 && data)   memcpy(pkt->data, data, datalen);
 	add_packet_crc(pkt);
 	buf->datalen=MCU_PACKET_HDRLEN+datalen+1; buf->dataofs=0;
-    // DEBUGHEXBUF(APP_SERIAL_LOG_EN, "[MCU] > %s", buf->data, buf->datalen);
 	MCU_DEBUG_PACKET("[MCU]", 1, buf->data, buf->datalen);
     // buffer state
 	buf->bstate=BSTATE_READY; buf->ptype=ptype; buf->pstate=PSTATE_NONE;
@@ -467,7 +467,7 @@ enum {
 	CMD_DetectHeartbeat = 0x00, // datalen=0, response ack status (0=first after restart, 1=running)
 	CMD_GetMCUInformation = 0x01, // datalen=0, response ack data (ProduktID,Version,...)
 	CMD_RequestWorkingMode = 0x02, // datalen=0, response ack
-	CMD_SendModuleStatus = 0x03, // datalen=1, response ack status (0=success)
+	CMD_SendModuleStatus = 0x03, // datalen=1, response V1.0:<none> V1.1:ack
 	CMD_SendCommands = 0x06, // datalen=x DP list, response ack status (0=success)
 	CMD_QueryStatus = 0x08, // datalen=0, response ReportStatus=0x07
 	CMD_NotifyFactoryReset = 0xA1, // datalen=0, response none
@@ -475,13 +475,14 @@ enum {
 	// from MCU
 	CMD_ResetModule = 0x04, // datalen=0, response ack
 	CMD_ResetModuleNew = 0x05, // datalen=0, response ack
-	CMD_ReportStatus = 0x07, // datalen=x DP list
+	CMD_ReportStatus = 0x07, // datalen=x DP list, response V1.1:response ack status
 	CMD_UnbindModule = 0x09, // datalen=0, response ack status
 	CMD_QueryConnectionStatus = 0x0A, // datalen=0, response SendModuleStatus
 	CMD_QueryRSSI = 0x0E, // datalen=0, response ack data (RSSI info)
 	CMD_QueryModuleVersion = 0xA0, // datalen=0, response ack data (version info)
 	CMD_ReportData = 0xE0, // DP list, response ack status (0=success)
 	CMD_GetCurrentTime = 0xE1, // datalen=1 time type, response ack data (time data)
+	CMD_ModifyADVInterval = 0xE2, // datalen=1 interval time (0.1 sec), response ack status (0=success)
 	CMD_ConfigSystemTimer = 0xE4, // datalen=1 1=enable, response ack status (0=success)
 	CMD_EnableLowPower = 0xE5, // datalen=1 1=enable, response ack status (0=success)
 	CMD_ReportMCUVersion = 0xE9, // datalen=6 version info, response ack status (0=success)
@@ -518,11 +519,11 @@ typedef struct _attribute_packed_ _mcu_data_time1_t
 static void MCU_DEBUG_PACKET(const char *info, u8 tx, const u8 *data, u16 datalen)
 {
 	u8 u; const mcu_packet_t *pkt=(const mcu_packet_t *)data;
-	DEBUGOUTSTR(info); DEBUGOUT(' ');
+	DBGBRK(); DEBUGOUTSTR(info); DEBUGOUT(' ');
 	DEBUGOUT(tx ? '>' : '<' ); DEBUGOUT(' ');
 	for (u=0; u<datalen; u++)   DEBUGOUTHEX(data[u]);
 	if (datalen<MCU_PACKET_HDRLEN) { DEBUGOUT('\n'); return; }
-	enum { PARAM_None=0, PARAM_Ack, PARAM_Status, PARAM_Enable, PARAM_Running, PARAM_ModStat, PARAM_PID, PARAM_Version, PARAM_Time, PARAM_DPData };
+	enum { PARAM_None=0, PARAM_Ack, PARAM_Status, PARAM_Enable, PARAM_Running, PARAM_ModStat, PARAM_PID, PARAM_Version, PARAM_Time, PARAM_DPData, PARAM_Interval };
 	static const struct { u8 cmd; const char *txt; u8 notify; u8 txparam; u8 rxparam; } _cmd2txt[]={
 		{CMD_DetectHeartbeat, "DetectHeartbeat", 0, PARAM_None, PARAM_Running},
 		{CMD_GetMCUInformation, "GetMCUInformation", 0, PARAM_None, PARAM_PID},
@@ -541,6 +542,7 @@ static void MCU_DEBUG_PACKET(const char *info, u8 tx, const u8 *data, u16 datale
 		{CMD_QueryModuleVersion, "QueryModuleVersion", 1, PARAM_Version, PARAM_None},
 		{CMD_ReportData, "ReportData", 1, PARAM_Ack, PARAM_DPData},
 		{CMD_GetCurrentTime, "GetCurrentTime", 1, PARAM_Time, PARAM_None},
+		{CMD_ModifyADVInterval, "ModifyADVInterval", 1, PARAM_Ack, PARAM_Interval },
 		{CMD_ConfigSystemTimer, "ConfigSystemTimer", 1},
 		{CMD_EnableLowPower, "EnableLowPower", 1, PARAM_Ack, PARAM_Enable},
 		{CMD_ReportMCUVersion, "ReportMCUVersion", 1},
@@ -578,6 +580,11 @@ static void MCU_DEBUG_PACKET(const char *info, u8 tx, const u8 *data, u16 datale
 			for(ofs=0; ofs<3; ofs++) { DEBUGOUT('0'+pkt->data[ofs]); if (ofs<2) DEBUGOUT('.'); }
 			DEBUGOUTSTR(" Hard: ");
 			for(ofs=3; ofs<6; ofs++) { DEBUGOUT('0'+pkt->data[ofs]); if (ofs<5) DEBUGOUT('.'); }
+        }
+		if (param_type==PARAM_INTERVAL && pkt_data_len>=1) {
+			DEBUGOUTSTR("Interval: ");
+         DEBUGOUT( (pkt->data[0]/10)+'0' ); DEBUGOUT('.'); DEBUGOUT( (pkt->data[0]%10)+'0' );
+         DEBUGOUTSTR(" sec");
 		}
 		break;
 	}
@@ -601,7 +608,7 @@ typedef struct _attribute_packed_ _mcu_cmd_seq_t
 } mcu_cmd_seq_t;
 
 static const u8 data_module_status_idle = DATA_ModuleStatus_Idle;
-// static const u8 data_module_status_bound = DATA_ModuleStatus_Bound;
+static const u8 data_module_status_bond = DATA_ModuleStatus_Bound;
 static const u8 data_module_status_connected = DATA_ModuleStatus_Connected;
 
 static _attribute_data_retention_ char mcu_pid[8]={0,0,0,0,0,0,0,0}; // product id
@@ -618,14 +625,6 @@ static const struct _mcu_cmd_seq_t mcu_init_cmd_seq[]={
 	{CMD_None}
 };
 
-static const struct _mcu_cmd_seq_t mcu_start_measure_cmd_seq[]={
-	{CMD_DetectHeartbeat, 0, 0, CMD_DetectHeartbeat, 0, 0},
-	{CMD_RequestWorkingMode, 0, 0, CMD_RequestWorkingMode, 0, 0},
-	{CMD_QueryStatus, 0, 0, CMD_ReportStatus, 0, 0},
-	{CMD_SendModuleStatus, 1, &data_module_status_connected, CMD_None, 0, 0},
-	{CMD_None}
-};
-
 static const struct _mcu_cmd_seq_t mcu_start_connect_cmd_seq[]={
 	{CMD_DetectHeartbeat, 0, 0, CMD_DetectHeartbeat, 0, 0},
 	{CMD_SendModuleStatus, 1, &data_module_status_idle, CMD_None, 0, 0},
@@ -637,6 +636,28 @@ static const struct _mcu_cmd_seq_t mcu_update_connect_cmd_seq[]={
 	{CMD_SendModuleStatus, 1, &data_module_status_connected, CMD_None, 0, 0},
 	{CMD_DetectHeartbeat, 0, 0, CMD_DetectHeartbeat, 0, 0},
 	{CMD_SendModuleStatus, 1, &data_module_status_idle, CMD_None, 0, 0},
+	{CMD_None}
+};
+
+static const struct _mcu_cmd_seq_t mcu_start_measure_cmd_seq[]={
+	{CMD_DetectHeartbeat, 0, 0, CMD_DetectHeartbeat, 0, 0},
+	{CMD_RequestWorkingMode, 0, 0, CMD_RequestWorkingMode, 0, 0},
+	{CMD_QueryStatus, 0, 0, CMD_ReportStatus, 0, 0},
+	{CMD_SendModuleStatus, 1, &data_module_status_connected, CMD_None, 0, 0},
+	{CMD_None}
+};
+
+static const struct _mcu_cmd_seq_t mcu_start_poll_cmd_seq[]={
+	{CMD_DetectHeartbeat, 0, 0, CMD_DetectHeartbeat, 0, 0},
+	{CMD_SendModuleStatus, 1, &data_module_status_connected, CMD_None, 0, 0},
+	{CMD_RequestWorkingMode, 0, 0, CMD_RequestWorkingMode, 0, 0},
+	{CMD_None}
+};
+
+static const struct _mcu_cmd_seq_t mcu_end_poll_cmd_seq[]={
+	{CMD_DetectHeartbeat, 0, 0, CMD_DetectHeartbeat, 0, 0},
+	{CMD_QueryStatus, 0, 0, CMD_ReportStatus, 0, 0},
+	{CMD_SendModuleStatus, 1, &data_module_status_bond, CMD_None, 0, 0},
 	{CMD_None}
 };
 
@@ -737,8 +758,11 @@ _attribute_optimize_size_ static u8 mcu_cmd_seq_rx_notify(const mcu_packet_t *pk
 			memcpy( current_cmd_seq->respdata, pkt->data, len);
 		}
 		current_cmd_seq_stat++;
+		return 2; // busy + handled
 	}
-	return (current_cmd_seq?1:0); // busy
+	if (current_cmd_seq)
+		return 1; // busy
+	return 0; // idle
 }
 
 //
@@ -759,13 +783,13 @@ _attribute_optimize_size_ static u8 rx_notify(const mcu_packet_t *pkt)
 	// app data notify
 	u8 notify=0;
 	if (pkt->command==CMD_GetMCUInformation)	notify=APP_NOTIFY_PRODUCTID;
-	else if (pkt->command==CMD_ReportData)		notify=APP_NOTIFY_DPDATA;
-	else if (pkt->command==CMD_ReportStatus)	notify=APP_NOTIFY_DPDATA;
+	else if (pkt->command==CMD_ReportData)		notify=APP_NOTIFY_DPDATA_REPORT; // MCU data change notification
+	else if (pkt->command==CMD_ReportStatus)	notify=APP_NOTIFY_DPDATA; // Module requested data
 	else if (pkt->command==CMD_ResetModule)		notify=APP_NOTIFY_FACTORYRESET;
 	else if (pkt->command==CMD_ResetModuleNew)	notify=APP_NOTIFY_FACTORYRESET;
 	if (notify)   app_notify(notify, pkt->data, packet_datalen(pkt));
 	// command response from MCU
-	u8 cmdresp=RESP_none;
+	u8 ret=0, cmdresp=RESP_none;
 	switch (pkt->command)
 	{
 		case CMD_DetectHeartbeat: // 0x00, datalen=0, response ack status (0=first after restart, 1=running)
@@ -778,13 +802,15 @@ _attribute_optimize_size_ static u8 rx_notify(const mcu_packet_t *pkt)
 			cmdresp=RESP_ack_status; break;
 		case CMD_ReportStatus: // 0x07 DP list (response to CMD_QueryStatus)
 			cmdresp=RESP_data; break;
+		case CMD_ReportData: // may is answer to sendcommands
+			cmdresp=RESP_data; break;
 		case CMD_QueryMCUVersion: // 0xE8 datalen=0, reponse ack data (version info)
 			cmdresp=RESP_data; break;
 	}
 	if (cmdresp != RESP_none)
 	{
-		u8 ret=mcu_cmd_seq_rx_notify(pkt); // handle command sequence response
-		return ret;
+		ret=mcu_cmd_seq_rx_notify(pkt); // handle command sequence response
+		if (ret==2)    return 1; // handled
 	}
 	// command from MCU
 	u8 resp=RESP_none, respcmd=pkt->command, respack=DATA_Ack_Status_Success;
@@ -811,13 +837,23 @@ _attribute_optimize_size_ static u8 rx_notify(const mcu_packet_t *pkt)
 			if (packet_datalen(pkt) != 1)   break;
 			// u8 time_format=(pkt->data[0] & 0x0F);
 			// u8 time_source=(pkt->data[0] >> 4) & 0x03;
-			static const char *utime="1749986458000"; // send some time
+
+			// static const char *utime="1749986458000"; // send some time
+			char utime[13]; u32 time_sec=1749986458000+app_sec_time(); // some start time
+			for (signed char i=12; i>=0; i--)
+			{
+				utime[i]='0'+(u8)(time_sec % 10); time_sec=(time_sec / 10);
+			}
+
+
 			mcu_data_time1_t t; t.result=DATA_Ack_Status_Success; t.format=1;
 			memcpy(t.time_string, utime, 13);
 			t.time_zone0=0; t.time_zone1=0xc8;
 			mcu_send(PTYPE_RESP, CMD_GetCurrentTime, sizeof(t), (const u8 *)&t);
 			resp=RESP_data; break;
 		} break;
+		case CMD_ModifyADVInterval: // 0xE2, // datalen=1 interval time (0.1 sec unit)
+			resp=RESP_ack_status; break;
 		case CMD_ConfigSystemTimer: // 0xE4, // datalen=1 1=enable
 			resp=RESP_ack_status; break;
 		case CMD_EnableLowPower: // 0xE5, // datalen=1 1=enable
@@ -830,9 +866,9 @@ _attribute_optimize_size_ static u8 rx_notify(const mcu_packet_t *pkt)
 		// send generic ACK response
 		if (resp == RESP_ack)		 { mcu_send_ack(respcmd); }
 		if (resp == RESP_ack_status) { mcu_send_ack_status(respcmd, respack); }
-		return 1; // 1=busy
+		ret=1; // 1=busy
 	}
-	return 0;
+	return ret;
 }
 
 _attribute_optimize_size_ static u8 rxtx_notify(int evt, u8 stat, const mcu_packet_t *pkt)
@@ -849,6 +885,11 @@ _attribute_optimize_size_ static u8 rxtx_notify(int evt, u8 stat, const mcu_pack
 //
 
 static u32 mcu_init_cmd_start=0;
+
+_attribute_optimize_size_ void app_serial_set_baudrate(u16 baud)
+{
+	mcu_uart_baudrate=baud;
+}
 
 void app_serial_init_normal(void)
 {
@@ -922,11 +963,16 @@ u8 app_serial_rxtx_busy(void)
 }
 
 static const mcu_cmd_seq_t *cmd_seq_def[]={
-	0, mcu_init_cmd_seq, mcu_start_measure_cmd_seq,
-	mcu_start_connect_cmd_seq, mcu_update_connect_cmd_seq,
-	mcu_check_stat_cmd_seq};
+	0, 							// MCU_CMD_SEQ_NONE=0
+	mcu_init_cmd_seq, 			// MCU_CMD_SEQ_INIT
+	mcu_start_connect_cmd_seq,	// MCU_CMD_SEQ_START_CONNECT
+	mcu_update_connect_cmd_seq, // MCU_CMD_SEQ_UPDATE_CONNECT
+	mcu_start_measure_cmd_seq,  // MCU_CMD_SEQ_START_MEASURE
+	mcu_start_poll_cmd_seq,     // MCU_CMD_SEQ_START_POLL
+	mcu_end_poll_cmd_seq,       // MCU_CMD_SEQ_END_POLL
+	mcu_check_stat_cmd_seq};	// MCU_CMD_SEQ_CHECKSTAT
 #if (APP_SERIAL_DEBUG_EN)
-static const char *cmd_seq_dbg[] = {"<none>", "init", "measure", "connect", "update", "checkstat"};
+static const char *cmd_seq_dbg[] = {"<none>", "init", "connect", "update", "measure", "startpoll", "endpoll", "checkstat"};
 #endif
 
 _attribute_optimize_size_ void app_serial_cmd_seq_start(u8 cmd_seq, u32 delay)

@@ -36,8 +36,11 @@
 #ifndef BLE_ATT_CRYPTKEY_CHANGE_ENABLE
 #define BLE_ATT_CRYPTKEY_CHANGE_ENABLE 1
 #endif
-#ifndef BLE_ATT_CUSTOMCONFIG
-#define BLE_ATT_CUSTOMCONFIG 0
+#ifndef BLE_ATT_SGS01_CONFIG
+#define BLE_ATT_SGS01_CONFIG 0
+#endif
+#ifndef APP_MCU_POLL_ENABLE
+#define APP_MCU_POLL_ENABLE 0
 #endif
 
 // helpers
@@ -129,7 +132,7 @@ typedef enum
 	CustomConfig_EncryptKey_CD_H,			// prop
 	CustomConfig_EncryptKey_DP_H,			// value
 	CustomConfig_EncryptKey_DESC_H,         // desc
-	#if (BLE_ATT_CUSTOMCONFIG)
+	#if (BLE_ATT_SGS01_CONFIG)
 	CustomConfig_PowerLevel_CD_H,			// prop
 	CustomConfig_PowerLevel_DP_H,			// value
 	CustomConfig_DeviceMode_CD_H,			// prop
@@ -138,6 +141,11 @@ typedef enum
 	CustomConfig_DataFormat_CD_H,			// prop
 	CustomConfig_DataFormat_DP_H,			// value
 	CustomConfig_DataFormat_DESC_H,			// desc
+	#if (APP_MCU_POLL_ENABLE)
+	CustomConfig_MCUPollInterval_CD_H,		// prop
+	CustomConfig_MCUPollInterval_DP_H,		// value
+	CustomConfig_MCUPollInterval_DESC_H,	// desc
+	#endif
 	#endif
 	CustomConfig_BTHomeData_CD_H,			// prop
 	CustomConfig_BTHomeData_DP_H,			// value
@@ -157,6 +165,7 @@ typedef enum
 	ATT_END_H,
 } ATT_HANDLE;
 
+#define CustomConfig_Count (CustomConfig_FactoryReset_DESC_H - CustomConfig_PS_H + 1)
 
 
 // GAP device name / appearance
@@ -236,12 +245,12 @@ static const u16 att_devInfoHardwareRevUUID = CHARACTERISTIC_UUID_HARDWARE_REV; 
 static const u16 att_devInfoSoftwareRevUUID = CHARACTERISTIC_UUID_SOFTWARE_REV; // 0x2A28
 static const u16 att_devInfoManufacturerUUID = CHARACTERISTIC_UUID_MANUFACTURER; // 0x2A29
 
-static const u8 att_ModelStr_val[] = {"SGS01-BTHome"};
+static const u8 att_ModelStr_valstr[] = {"SGS01-BTHome"};
 _attribute_data_retention_ static char att_SerialStr_val[21] = {"000000-000000-0000000"}; // set from flash id
-static const u8 att_FirmStr_val[] = {"github.com/haraldapp"};
-static const u8 att_HardStr_val[4] = {"V1.0"};
-static const u8 att_SoftStr_val[] = {VERSION_STR VERSION_STR_BUILD}; // app_config.h
-static const u8 att_ManStr_val[] = {"DIY.home"};
+static const u8 att_FirmStr_valstr[] = {"github.com/haraldapp"};
+static const u8 att_HardStr_valstr[] = {"V1.0"};
+static const u8 att_SoftStr_valstr[] = {VERSION_STR VERSION_STR_BUILD}; // app_config.h
+static const u8 att_ManStr_valstr[] = {"DIY.home"};
 
 //TODO: may get hardware revision from MCU information
 //TODO: may add software revision from MCU information
@@ -326,50 +335,71 @@ static const u8 att_batCharVal_def[5] = {
 //   Att FactoryReset: b0a7e40f-2b87-49db-801c-eb3686a24bdb
 #define CHARACTERISTIC_UUID_POWER_LEVEL	0x2A07
 
-#define CUSTOM_SERVICE_UUID 0x25,0x12,0xB5,0xCB,0xD4,0x60,0x80,0x0C,0x15,0xC3,0x9B,0xA9,0xAC,0x5A,0x8A,0xDE
-#define CUSTOM_ATT_PINCODE_UUID 0x03,0x6C,0x5F,0x6D,0x94,0x1F,0x89,0x89,0xAE,0x49,0x0C,0x86,0x04,0x71,0xFB,0x0F
-#define CUSTOM_ATT_ENCRYPTKEY_UUID 0x1A,0xA8,0xAB,0x55,0x4F,0x97,0xF9,0xA6,0x24,0x47,0x4B,0xAF,0x1B,0xB4,0x0F,0xEB
-#define CUSTOM_ATT_DEVICEMODE_UUID  0x74,0xDA,0xE1,0xC5,0x97,0xD5,0xE1,0x81,0x73,0x45,0x2E,0xD3,0x00,0xA8,0x46,0x95
-#define CUSTOM_ATT_DATAFORMAT_UUID  0x74,0xDA,0xE1,0xC5,0x97,0xD5,0xE1,0x81,0x73,0x45,0x2E,0xD3,0x01,0xA8,0x46,0x95
-#define CUSTOM_ATT_BTHOMEDATA_UUID 0xDB,0x5D,0x6A,0xF6,0xD5,0x70,0x1B,0xBE,0x21,0x4D,0xAC,0x98,0xDF,0x46,0x22,0xD5
+#define CUSTOM_SERVICE_UUID 			0x25,0x12,0xB5,0xCB,0xD4,0x60,0x80,0x0C,0x15,0xC3,0x9B,0xA9,0xAC,0x5A,0x8A,0xDE
+#define CUSTOM_ATT_PINCODE_UUID 		0x03,0x6C,0x5F,0x6D,0x94,0x1F,0x89,0x89,0xAE,0x49,0x0C,0x86,0x04,0x71,0xFB,0x0F
+#define CUSTOM_ATT_ENCRYPTKEY_UUID 		0x1A,0xA8,0xAB,0x55,0x4F,0x97,0xF9,0xA6,0x24,0x47,0x4B,0xAF,0x1B,0xB4,0x0F,0xEB
+#define CUSTOM_ATT_DEVICEMODE_UUID 		0x74,0xDA,0xE1,0xC5,0x97,0xD5,0xE1,0x81,0x73,0x45,0x2E,0xD3,0x00,0xA8,0x46,0x95
+#define CUSTOM_ATT_DATAFORMAT_UUID 		0x74,0xDA,0xE1,0xC5,0x97,0xD5,0xE1,0x81,0x73,0x45,0x2E,0xD3,0x01,0xA8,0x46,0x95
+#define CUSTOM_ATT_MCUPOLLINTERVAL_UUID 0x74,0xDA,0xE1,0xC5,0x97,0xD5,0xE1,0x81,0x73,0x45,0x2E,0xD3,0x02,0xA8,0x46,0x95
+#define CUSTOM_ATT_BTHOMEDATA_UUID 		0xDB,0x5D,0x6A,0xF6,0xD5,0x70,0x1B,0xBE,0x21,0x4D,0xAC,0x98,0xDF,0x46,0x22,0xD5
 
-#define CUSTOM_ATT_FACTORYRESET_UUID 0xDB,0x4B,0xA2,0x86,0x36,0xEB,0x1C,0x80,0xDB,0x49,0x87,0x2B,0x0F,0xE4,0xA7,0xB0
+#define CUSTOM_ATT_FACTORYRESET_UUID 	0xDB,0x4B,0xA2,0x86,0x36,0xEB,0x1C,0x80,0xDB,0x49,0x87,0x2B,0x0F,0xE4,0xA7,0xB0
 static const u8 att_CustomServiceUUID16[16] = WRAPPING_BRACES(CUSTOM_SERVICE_UUID);
 static const u8 att_CustomAttPincodeUUID16[16] = WRAPPING_BRACES(CUSTOM_ATT_PINCODE_UUID);
 static const u8 att_CustomAttEncryptKeyUUID16[16] = WRAPPING_BRACES(CUSTOM_ATT_ENCRYPTKEY_UUID);
-#if (BLE_ATT_CUSTOMCONFIG)
+#if (BLE_ATT_SGS01_CONFIG)
 static const u16 att_CustomAttPowerLevelUUID = CHARACTERISTIC_UUID_POWER_LEVEL;
 static const u8 att_CustomAttDeviceModeUUID16[16] = WRAPPING_BRACES(CUSTOM_ATT_DEVICEMODE_UUID);
 static const u8 att_CustomAttDataFormatUUID16[16] = WRAPPING_BRACES(CUSTOM_ATT_DATAFORMAT_UUID);
+#if (APP_MCU_POLL_ENABLE)
+static const u8 att_CustomAttMCUPollIntervalUUID16[16] = WRAPPING_BRACES(CUSTOM_ATT_MCUPOLLINTERVAL_UUID);
+#endif
 #endif
 static const u8 att_CustomAttBTHomeDataUUID16[16] = WRAPPING_BRACES(CUSTOM_ATT_BTHOMEDATA_UUID);
 static const u8 att_CustomAttFactoryResetUUID16[16] = WRAPPING_BRACES(CUSTOM_ATT_FACTORYRESET_UUID);
 
 _attribute_data_retention_ static u8 att_customPincode_val[4] = {0,0,0,0};
 _attribute_data_retention_ static u8 att_customEncryptKey_val[16] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
-#if (BLE_ATT_CUSTOMCONFIG)
+#if (BLE_ATT_SGS01_CONFIG)
 _attribute_data_retention_ static u8 att_customPowerLevel_val[1] = {3};
 _attribute_data_retention_ static u8 att_customDeviceMode_val[1] = {0};
 _attribute_data_retention_ static u8 att_customDataFormat_val[1] = {0};
+#if (APP_MCU_POLL_ENABLE)
+_attribute_data_retention_ static u8 att_customMCUPollInterval_val[2] = {0};
+#endif
 #endif
 _attribute_data_retention_ static u8 att_customBTHomeData_val[20];
+_attribute_data_retention_ static u8 att_customBTHomeData_vallen = 0;
 _attribute_data_retention_ static u8 att_customBTHomeData_ccc[2] = {0,0};
 _attribute_data_retention_ static u8 att_customFactoryReset_val[1] = {0};
 
 static const u8 att_customPincode_desc[]={'P','i','n','c','o','d','e'};
 static const u8 att_customEncryptKey_desc[]={'E','n','c','r','y','p','t','i','o','n',' ','K','e','y'};
-#if (BLE_ATT_CUSTOMCONFIG)
+#if (BLE_ATT_SGS01_CONFIG)
 static const u8 att_customDeviceMode_desc[]={'D','e','v','i','c','e',' ','M','o','d','e'};
 static const u8 att_customDataFormat_desc[]={'D','a','t','a',' ','F','o','r','m','a','t'};
+#if (APP_MCU_POLL_ENABLE)
+static const u8 att_customMCUPollInterval_desc[]={'M','C','U',' ','P','o','l','l',' ','I','n','t','e','r','v','a','l'};
+#endif
 #endif
 static const u8 att_customBTHomeData_desc[]={'B','T','H','o','m','e',' ','D','a','t','a'};
 static const u8 att_customFactoryReset_desc[]={'F','a','c','t','o','r','y',' ','R','e','s','e','t'};
 
+#if (APP_DEBUG_ENABLE)
 static const u8 att_customPincode_def[19] = {
 	CHAR_PROP_READ | CHAR_PROP_WRITE_WITHOUT_RSP | CHAR_PROP_WRITE,
 	U16_LO(CustomConfig_Pincode_DP_H), U16_HI(CustomConfig_Pincode_DP_H),
 	CUSTOM_ATT_PINCODE_UUID
 };
+#define ATT_PINCODE_PERMISSIONS ATT_PERMISSIONS_ENCRYPT_RDWR
+#else
+static const u8 att_customPincode_def[19] = {
+	CHAR_PROP_WRITE_WITHOUT_RSP | CHAR_PROP_WRITE,
+	U16_LO(CustomConfig_Pincode_DP_H), U16_HI(CustomConfig_Pincode_DP_H),
+	CUSTOM_ATT_PINCODE_UUID
+};
+#define ATT_PINCODE_PERMISSIONS ATT_PERMISSIONS_ENCRYPT_WRITE
+#endif
 
 static const u8 att_customEncryptKey_def[19] = {
 	CHAR_PROP_READ | CHAR_PROP_WRITE_WITHOUT_RSP | CHAR_PROP_WRITE,
@@ -377,7 +407,7 @@ static const u8 att_customEncryptKey_def[19] = {
 	CUSTOM_ATT_ENCRYPTKEY_UUID
 };
 
-#if (BLE_ATT_CUSTOMCONFIG)
+#if (BLE_ATT_SGS01_CONFIG)
 static const u8 att_customPowerLevel_def[5] = {
 	CHAR_PROP_READ | CHAR_PROP_WRITE_WITHOUT_RSP | CHAR_PROP_WRITE,
 	U16_LO(CustomConfig_PowerLevel_DP_H), U16_HI(CustomConfig_PowerLevel_DP_H),
@@ -395,6 +425,13 @@ static const u8 att_customDataFormat_def[19] = {
 	U16_LO(CustomConfig_DataFormat_DP_H), U16_HI(CustomConfig_DataFormat_DP_H),
 	CUSTOM_ATT_DATAFORMAT_UUID
 };
+#if (APP_MCU_POLL_ENABLE)
+static const u8 att_customMCUPollInterval_def[19] = {
+	CHAR_PROP_READ | CHAR_PROP_WRITE_WITHOUT_RSP | CHAR_PROP_WRITE,
+	U16_LO(CustomConfig_MCUPollInterval_DP_H), U16_HI(CustomConfig_MCUPollInterval_DP_H),
+	CUSTOM_ATT_MCUPOLLINTERVAL_UUID
+};
+#endif
 #endif
 
 static const u8 att_customBTHomeData_def[19] = {
@@ -409,6 +446,26 @@ static const u8 att_customAttFactoryReset_def[19] = {
 	CUSTOM_ATT_FACTORYRESET_UUID
 };
 
+static int customConfigReadCB(void *p)
+{
+	rf_packet_att_data_t *req = (rf_packet_att_data_t*) p;
+	u16 att = req->handle; u16 connHandle=0;
+	if (att == CustomConfig_EncryptKey_DP_H)
+	{
+		if (!app_ble_device_connected_secure_auth())   return 0x05; // "requires authentication"
+	    DEBUGHEXBUF(APP_ATT_LOG_EN, "[ATT] Read EncryptKey: %s", att_customEncryptKey_val, 16);
+		blc_gatt_pushHandleValueNotify(connHandle, att, att_customEncryptKey_val, 16);
+	    return 0; // ok
+	}
+	if (att == CustomConfig_BTHomeData_DP_H)
+	{
+	    DEBUGHEXBUF(APP_ATT_LOG_EN, "[ATT] Read BTHome data: %s", att_customBTHomeData_val, att_customBTHomeData_vallen);
+		blc_gatt_pushHandleValueNotify(connHandle, att, att_customBTHomeData_val, att_customBTHomeData_vallen);
+	    return 0; // ok
+	}
+	return 0x01; // error "invalid handle"
+}
+
 static int customConfigWriteCB(void *p)
 {
 	rf_packet_att_data_t *req = (rf_packet_att_data_t*) p;
@@ -417,34 +474,37 @@ static int customConfigWriteCB(void *p)
 	u16 att = req->handle, len = req->l2cap - 3; u8 *data=req->dat;
 	if (att == CustomConfig_Pincode_DP_H)
 	{
-		if (len != 4)   return 1;
+		if (len != 4)   return 0x0D; // "invalid attribute length"
 		u32 pin_old=get_u32(att_customPincode_val), pin_new=get_u32(data);
 	    DEBUGFMT(APP_ATT_LOG_EN, "[ATT] Write Pincode %u (%u)", pin_new, pin_old);
 	    userActionCB(p); // reset connection timeout
-		if (pin_new == pin_old)   return 0;
+		if (pin_new == pin_old)   return 0; // ok - no change
 	    set_u32(att_customPincode_val, pin_new);
 	    app_config_set_pincode(pin_new); // update config
 	    if ((pin_new!=0 && pin_old==0) || (pin_new==0 && pin_old!=0))
 	    {	// delete bonding info -> new pairing required
 	    	app_ble_async_command(APP_BLE_CMD_DELETEBOND); // exec after disconnect
 	    }
-	    return 1; // all done
+	    return 0; // ok
 	}
 	if (att == CustomConfig_EncryptKey_DP_H)
 	{
-		if (len != 16)   return 1;
+		if (len != 16)   return 0x0D; // "invalid attribute length"
+		if (!app_ble_device_connected_secure_auth())   return 0x05; // "requires authentication"
 		#if (BLE_ATT_CRYPTKEY_CHANGE_ENABLE)
 	    DEBUGHEXBUF(APP_ATT_LOG_EN, "[ATT] Write EncryptKey: %s", data, 16);
 	    memcpy(att_customEncryptKey_val, data, 16);
 	    app_config_set_key(data);
 		#else
 	    DEBUGSTR(APP_ATT_LOG_EN, "[ATT] Write EncryptKey: disabled by config");
+	    if (1)   return 0x06; // "request not supported"
 		#endif
-	    return 1; // all done
+	    return 0; // ok
 	}
-	#if (BLE_ATT_CUSTOMCONFIG)
+	#if (BLE_ATT_SGS01_CONFIG)
 	if (att == CustomConfig_PowerLevel_DP_H)
 	{
+		if (len != 1)   return 0x0D; // "invalid attribute length"
 		signed char powerlevel_old=(signed char)att_customPowerLevel_val[0];
 		signed char powerlevel_new=(signed char)req->dat[0];
 	    DEBUGFMT(APP_ATT_LOG_EN, "[ATT] Write PowerLevel %d (%d)", powerlevel_new, powerlevel_old);
@@ -453,35 +513,54 @@ static int customConfigWriteCB(void *p)
 	    att_customPowerLevel_val[0]=(u8)powerlevel_new;
 	    app_config_set_power_level(powerlevel_new); // update config
 	    app_ble_set_powerlevel(powerlevel_new); // update RF driver
-	    return 1;
+	    return 0; // ok
 	}
 	if (att == CustomConfig_DeviceMode_DP_H)
 	{
+		if (len != 1)   return 0x0D; // error "invalid attribute length"
 		u8 mode_old=att_customDeviceMode_val[0], mode_new=req->dat[0];
 	    DEBUGFMT(APP_ATT_LOG_EN, "[ATT] Write DeviceMode %u (%u)", mode_new, mode_old);
 	    userActionCB(p); // reset connection timeout
-	    if (mode_new == mode_old)   return 0;
+	    if (mode_new == mode_old)   return 0; // ok - no chnage
 	    att_customDeviceMode_val[0]=mode_new;
 	    app_config_set_mode(mode_new); // update config
 //TODO check if restart is needed
 	    app_ble_device_disconnect_restart(); // restart on disconnect
-	    return 1;
+	    return 0; // ok
 	}
 	if (att == CustomConfig_DataFormat_DP_H)
 	{
+		if (len != 1)   return 0x0D; // error "invalid attribute length"
 		u8 fmt_old=att_customDataFormat_val[0], fmt_new=req->dat[0];
 	    DEBUGFMT(APP_ATT_LOG_EN, "[ATT] Write DataFormat %u (%u)", fmt_new, fmt_old);
 	    userActionCB(p); // reset connection timeout
-	    if (fmt_new == fmt_old)   return 0;
+	    if (fmt_new == fmt_old)   return 0; // ok - no change
 	    att_customDataFormat_val[0]=fmt_new;
 	    app_config_set_dataformat(fmt_new); // update config
 	    app_ble_set_sensor_data_changed();
 	    app_ble_att_set_bthome_data(0, 0);
-	    return 1;
+	    return 0; // ok
 	}
+	#if (APP_MCU_POLL_ENABLE)
+	if (att == CustomConfig_MCUPollInterval_DP_H)
+	{
+		if (len != 2)   return 0x0D; // error "invalid attribute length"
+		u16 val_old=att_customMCUPollInterval_val[1]; val_old<<=8; val_old|=att_customMCUPollInterval_val[0];
+		u16 val_new=req->dat[1]; val_new<<=8; val_new|=req->dat[0];
+	    DEBUGFMT(APP_ATT_LOG_EN, "[ATT] Write MCUPollInterval %u (%u)", val_new, val_old);
+	    if (val_new>0 && val_new<30)   val_new=30; // min. 30 sec.
+	    userActionCB(p); // reset connection timeout
+	    if (val_new == val_old)   return 0; // ok - no change
+	    att_customMCUPollInterval_val[0]=req->dat[0]; att_customMCUPollInterval_val[1]=req->dat[1];
+	    app_config_set_mcupollinterval(val_new); // update config
+	    app_ble_device_disconnect_restart(); // restart on disconnect
+	    return 0; // ok
+	}
+	#endif
 	#endif
 	if (att == CustomConfig_FactoryReset_DP_H)
 	{
+		if (len != 1)   return 0x0D; // error "invalid attribute length"
 		u8 val_new=req->dat[0];
 	    DEBUGFMT(APP_ATT_LOG_EN, "[ATT] Write FactoryReset %u", val_new);
 	    userActionCB(p); // reset connection timeout
@@ -493,7 +572,7 @@ static int customConfigWriteCB(void *p)
 	    if (val_new==0x81) // stall
 			while (1);
 		#endif
-	    return 1;
+	    return 0; // ok
 	    // notes:
 	    //  - exec on disconnect
 	    //  - seems that some DIY devices use this UUID,
@@ -501,7 +580,7 @@ static int customConfigWriteCB(void *p)
 	    //  - value 0x02: soft restart device
 	    //    value 0x03: to run a factory reset
 	}
-	return 0;
+	return 0x01; // error "invalid handle"
 }
 
 void app_ble_att_setup_config(void)
@@ -514,13 +593,19 @@ void app_ble_att_setup_config(void)
 	{
 		u32 pin=app_config_get_pincode(); set_u32(att_customPincode_val, pin);
 	    DEBUGFMT(APP_ATT_LOG_EN, "[ATT] Setup Pincode %u", pin);
-		#if (BLE_ATT_CUSTOMCONFIG)
+		#if (BLE_ATT_SGS01_CONFIG)
 		u8 level=app_config_get_power_level(); att_customPowerLevel_val[0]=level;
 	    DEBUGFMT(APP_ATT_LOG_EN, "[ATT] Setup PowerLevel %u", level);
 		u8 mode=app_config_get_mode(); att_customDeviceMode_val[0]=mode;
 	    DEBUGFMT(APP_ATT_LOG_EN, "[ATT] Setup DeviceMode %u", mode);
 		u8 datafmt=app_config_get_dataformat(); att_customDataFormat_val[0]=datafmt;
 	    DEBUGFMT(APP_ATT_LOG_EN, "[ATT] Setup DataFormat %u", datafmt);
+		#if (APP_MCU_POLL_ENABLE)
+		u16 mcupollinterval=app_config_get_mcupollinterval();
+		att_customMCUPollInterval_val[0]=(u8)(mcupollinterval & 0xFF);
+		att_customMCUPollInterval_val[1]=(u8)(mcupollinterval >> 8);
+	    DEBUGFMT(APP_ATT_LOG_EN, "[ATT] Setup MCUPollInterval %u", mcupollinterval);
+		#endif
 		#endif
 	}
 	if (security_level==Authenticated_Pairing_with_Encryption)
@@ -528,7 +613,8 @@ void app_ble_att_setup_config(void)
 	    app_config_get_key(att_customEncryptKey_val);
 	    DEBUGHEXBUF(APP_ATT_LOG_EN, "[ATT] Setup EncryptKey %s", att_customEncryptKey_val, 16);
 	}
-	memset(att_customBTHomeData_val, 0xFF, sizeof(att_customBTHomeData_val));
+	memset(att_customBTHomeData_val, 0, sizeof(att_customBTHomeData_val));
+	att_customBTHomeData_vallen = 0;
 }
 
 u8 app_ble_att_get_factoryreset(u8 newval)
@@ -559,7 +645,8 @@ static const u8 att_otaData_def[19] = {
 #endif
 
 // GATT Profile Definition
-_attribute_data_retention_ static attribute_t att_Attributes[] =
+// _attribute_data_retention_ static attribute_t att_Attributes[] =
+static const attribute_t att_Attributes[] =
 {
 	{ATT_END_H - 1, 0,0,0,0,0,0,0},	// total count of attributes
 	// 0x0001 - 0x0007  GAP 0x1800
@@ -578,31 +665,31 @@ _attribute_data_retention_ static attribute_t att_Attributes[] =
 	// 0x000C - 0x0018 Device Information Service
 	{13,ATT_PERMISSIONS_READ,2,2,(u8*)(&att_primaryServiceUUID),(u8*)(&att_devInfoServiceUUID), 0},
 	{0,ATT_PERMISSIONS_READ,2,sizeof(att_ModChar_def),(u8*)(&att_characterUUID),(u8*)(att_ModChar_def), 0},
-	{0,ATT_PERMISSIONS_READ,2,sizeof(att_ModelStr_val),(u8*)(&att_devInfoModelUUID),(u8*)(att_ModelStr_val), 0},
+	{0,ATT_PERMISSIONS_READ,2,sizeof(att_ModelStr_valstr)-1,(u8*)(&att_devInfoModelUUID),(u8*)(att_ModelStr_valstr), 0},
 	{0,ATT_PERMISSIONS_READ,2,sizeof(att_SerialChar_def),(u8*)(&att_characterUUID),(u8*)(att_SerialChar_def), 0},
 	{0,ATT_PERMISSIONS_READ,2,sizeof(att_SerialStr_val),(u8*)(&att_devInfoSerialUUID),(u8*)(att_SerialStr_val), 0},
 	{0,ATT_PERMISSIONS_READ,2,sizeof(att_FirmChar_def),(u8*)(&att_characterUUID),(u8*)(att_FirmChar_def), 0},
-	{0,ATT_PERMISSIONS_READ,2,sizeof(att_FirmStr_val),(u8*)(&att_devInfoFirmwareRevUUID),(u8*)(att_FirmStr_val), 0},
+	{0,ATT_PERMISSIONS_READ,2,sizeof(att_FirmStr_valstr)-1,(u8*)(&att_devInfoFirmwareRevUUID),(u8*)(att_FirmStr_valstr), 0},
 	{0,ATT_PERMISSIONS_READ,2,sizeof(att_HardChar_def),(u8*)(&att_characterUUID),(u8*)(att_HardChar_def), 0},
-	{0,ATT_PERMISSIONS_READ,2,sizeof(att_HardStr_val),(u8*)(&att_devInfoHardwareRevUUID),(u8*)(att_HardStr_val), 0},
+	{0,ATT_PERMISSIONS_READ,2,sizeof(att_HardStr_valstr)-1,(u8*)(&att_devInfoHardwareRevUUID),(u8*)(att_HardStr_valstr), 0},
 	{0,ATT_PERMISSIONS_READ,2,sizeof(att_SoftChar_def),(u8*)(&att_characterUUID),(u8*)(att_SoftChar_def), 0},
-	{0,ATT_PERMISSIONS_READ,2,sizeof(att_SoftStr_val),(u8*)(&att_devInfoSoftwareRevUUID),(u8*)(att_SoftStr_val), 0},
+	{0,ATT_PERMISSIONS_READ,2,sizeof(att_SoftStr_valstr)-1,(u8*)(&att_devInfoSoftwareRevUUID),(u8*)(att_SoftStr_valstr), 0},
 	{0,ATT_PERMISSIONS_READ,2,sizeof(att_ManChar_def),(u8*)(&att_characterUUID),(u8*)(att_ManChar_def), 0},
-	{0,ATT_PERMISSIONS_READ,2,sizeof(att_ManStr_val),(u8*)(&att_devInfoManufacturerUUID),(u8*)(att_ManStr_val), 0},
+	{0,ATT_PERMISSIONS_READ,2,sizeof(att_ManStr_valstr)-1,(u8*)(&att_devInfoManufacturerUUID),(u8*)(att_ManStr_valstr), 0},
 	// 0x0019 - 0x001C Battery Service 0x180F
 	{4,ATT_PERMISSIONS_READ,2,2,(u8*)(&att_primaryServiceUUID),(u8*)(&att_batServiceUUID),0,0},
 	{0,ATT_PERMISSIONS_READ,2,sizeof(att_batCharVal_def),(u8*)(&att_characterUUID),(u8*)(att_batCharVal_def),0,0}, // prop
 	{0,ATT_PERMISSIONS_READ,2,sizeof(att_bat_val),(u8*)(&att_batCharUUID),(u8*)(att_bat_val),0,0}, // value
 	{0,ATT_PERMISSIONS_RDWR,2,sizeof(att_bat_ccc),(u8*)(&att_clientCharacterCfgUUID),(u8*)(att_bat_ccc),0,0}, // value ccc
     // 0x001D - 0x0032 Custom Configuration Service
-	{22,ATT_PERMISSIONS_READ,2,16,(u8*)(&att_primaryServiceUUID),(u8*)(att_CustomServiceUUID16),0,0},
+	{CustomConfig_Count,ATT_PERMISSIONS_READ,2,16,(u8*)(&att_primaryServiceUUID),(u8*)(att_CustomServiceUUID16),0,0},
 	{0,ATT_PERMISSIONS_READ,2,sizeof(att_customPincode_def),(u8*)(&att_characterUUID),(u8*)(att_customPincode_def),0,0}, // prop
-	{0,ATT_PERMISSIONS_ENCRYPT_RDWR,16,sizeof(att_customPincode_val),(u8*)(att_CustomAttPincodeUUID16),(u8*)(att_customPincode_val),&customConfigWriteCB,0}, // value
+	{0,ATT_PINCODE_PERMISSIONS,16,sizeof(att_customPincode_val),(u8*)(att_CustomAttPincodeUUID16),(u8*)(att_customPincode_val),&customConfigWriteCB,0}, // value
 	{0,ATT_PERMISSIONS_READ,2,sizeof(att_customPincode_desc),(u8*)(&att_userdesc_UUID),(u8*)(att_customPincode_desc),0,0}, // desc
 	{0,ATT_PERMISSIONS_READ,2,sizeof(att_customEncryptKey_def),(u8*)(&att_characterUUID),(u8*)(att_customEncryptKey_def),0,0}, // prop
-	{0,ATT_PERMISSIONS_SECURE_CONN_RDWR,16,sizeof(att_customEncryptKey_val),(u8*)(att_CustomAttEncryptKeyUUID16),(u8*)(att_customEncryptKey_val),&customConfigWriteCB,0}, // value
+	{0,ATT_PERMISSIONS_ENCRYPT_RDWR,16,sizeof(att_customEncryptKey_val),(u8*)(att_CustomAttEncryptKeyUUID16),(u8*)(att_customEncryptKey_val),&customConfigWriteCB,&customConfigReadCB}, // value
 	{0,ATT_PERMISSIONS_READ,2,sizeof(att_customEncryptKey_desc),(u8*)(&att_userdesc_UUID),(u8*)(att_customEncryptKey_desc),0,0}, // desc
-	#if (BLE_ATT_CUSTOMCONFIG)
+	#if (BLE_ATT_SGS01_CONFIG)
 	{0,ATT_PERMISSIONS_READ,2,sizeof(att_customPowerLevel_def),(u8*)(&att_characterUUID),(u8*)(att_customPowerLevel_def),0,0}, // prop
 	{0,ATT_PERMISSIONS_ENCRYPT_RDWR,2,sizeof(att_customPowerLevel_val),(u8*)(&att_CustomAttPowerLevelUUID),(u8*)(att_customPowerLevel_val),&customConfigWriteCB,0}, // value
 	{0,ATT_PERMISSIONS_READ,2,sizeof(att_customDeviceMode_def),(u8*)(&att_characterUUID),(u8*)(att_customDeviceMode_def),0,0}, // prop
@@ -611,13 +698,18 @@ _attribute_data_retention_ static attribute_t att_Attributes[] =
 	{0,ATT_PERMISSIONS_READ,2,sizeof(att_customDataFormat_def),(u8*)(&att_characterUUID),(u8*)(att_customDataFormat_def),0,0}, // prop
 	{0,ATT_PERMISSIONS_ENCRYPT_RDWR,16,sizeof(att_customDataFormat_val),(u8*)(&att_CustomAttDataFormatUUID16),(u8*)(att_customDataFormat_val),&customConfigWriteCB,0}, // value
 	{0,ATT_PERMISSIONS_READ,2,sizeof(att_customDataFormat_desc),(u8*)(&att_userdesc_UUID),(u8*)(att_customDataFormat_desc),0,0}, // desc
+	#if (APP_MCU_POLL_ENABLE)
+	{0,ATT_PERMISSIONS_READ,2,sizeof(att_customMCUPollInterval_def),(u8*)(&att_characterUUID),(u8*)(att_customMCUPollInterval_def),0,0}, // prop
+	{0,ATT_PERMISSIONS_ENCRYPT_RDWR,16,sizeof(att_customMCUPollInterval_val),(u8*)(&att_CustomAttMCUPollIntervalUUID16),(u8*)(att_customMCUPollInterval_val),&customConfigWriteCB,0}, // value
+	{0,ATT_PERMISSIONS_READ,2,sizeof(att_customMCUPollInterval_desc),(u8*)(&att_userdesc_UUID),(u8*)(att_customMCUPollInterval_desc),0,0}, // desc
+	#endif
 	#endif
 	{0,ATT_PERMISSIONS_READ,2,sizeof(att_customBTHomeData_def),(u8*)(&att_characterUUID),(u8*)(att_customBTHomeData_def),0,0}, // prop
-	{0,ATT_PERMISSIONS_ENCRYPT_READ,16,sizeof(att_customBTHomeData_val),(u8*)(att_CustomAttBTHomeDataUUID16),(u8*)(att_customBTHomeData_val),0,0}, // value (initial size 0)
-	{0,ATT_PERMISSIONS_RDWR,2,sizeof(att_customBTHomeData_ccc),(u8*)(&att_clientCharacterCfgUUID),(u8*)(att_customBTHomeData_ccc),0,0}, // value ccc
+	{0,ATT_PERMISSIONS_ENCRYPT_READ,16,sizeof(att_customBTHomeData_val),(u8*)(att_CustomAttBTHomeDataUUID16),(u8*)(att_customBTHomeData_val),0,&customConfigReadCB}, // value (initial size 0)
+	{0,ATT_PERMISSIONS_ENCRYPT_RDWR,2,sizeof(att_customBTHomeData_ccc),(u8*)(&att_clientCharacterCfgUUID),(u8*)(att_customBTHomeData_ccc),0,0}, // value ccc
 	{0,ATT_PERMISSIONS_READ,2,sizeof(att_customBTHomeData_desc),(u8*)(&att_userdesc_UUID),(u8*)(att_customBTHomeData_desc),0,0}, // desc
 	{0,ATT_PERMISSIONS_READ,2,sizeof(att_customAttFactoryReset_def),(u8*)(&att_characterUUID),(u8*)(att_customAttFactoryReset_def),0,0}, // prop
-	{0,ATT_PERMISSIONS_SECURE_CONN_WRITE,16,sizeof(att_customFactoryReset_val),(u8*)(att_CustomAttFactoryResetUUID16),(u8*)(att_customFactoryReset_val),customConfigWriteCB,0}, // value
+	{0,ATT_PERMISSIONS_ENCRYPT_WRITE,16,sizeof(att_customFactoryReset_val),(u8*)(att_CustomAttFactoryResetUUID16),(u8*)(att_customFactoryReset_val),customConfigWriteCB,0}, // value
 	{0,ATT_PERMISSIONS_READ,2,sizeof(att_customFactoryReset_desc),(u8*)(&att_userdesc_UUID),(u8*)(att_customFactoryReset_desc),0,0}, // desc
 	// 0x0033 - 0x0037 TELink OTA Service
 	#if (BLE_OTA_SERVER_ENABLE)
@@ -634,8 +726,10 @@ void app_ble_att_init(void)
 {
 	app_ble_att_setup_serial();
 	app_ble_att_setup_config();
-	att_Attributes[CustomConfig_BTHomeData_DP_H].attrLen = 0; // variable length data
 	bls_att_setAttributeTable((u8 *)att_Attributes);
+	blc_att_enableReadReqReject(1);
+	blc_att_enableWriteReqReject(1); // auto send write reject errors (write callback return value)
+	att_customBTHomeData_vallen = 0;
 }
 
 void app_ble_att_set_battery_data(u8 val)
@@ -648,9 +742,7 @@ void app_ble_att_set_battery_data(u8 val)
 void app_ble_att_set_bthome_data(const u8 *data, u8 len)
 {
 	if (len > sizeof(att_customBTHomeData_val))   return;
-	att_Attributes[CustomConfig_BTHomeData_DP_H].attrLen = len;
-	if (!data || len==0)   return;
-	memset(att_customBTHomeData_val, 0xFF, sizeof(att_customBTHomeData_val));
+	att_customBTHomeData_vallen = len; if (!data || len==0)   return;
 	memcpy(att_customBTHomeData_val, data, len);
 	if (val_in_ccc(att_customBTHomeData_ccc))
 		bls_att_pushNotifyData(CustomConfig_BTHomeData_DP_H, att_customBTHomeData_val, len);
@@ -658,9 +750,8 @@ void app_ble_att_set_bthome_data(const u8 *data, u8 len)
 
 void app_ble_att_set_xiaomi_data(const u8 *data, u8 len)
 {
-	att_Attributes[CustomConfig_BTHomeData_DP_H].attrLen = 0;
+	att_customBTHomeData_vallen = 0;
 }
-
 
 #endif // #if (APP_BLE_ATT)  // component enabled
 

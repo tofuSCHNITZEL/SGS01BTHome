@@ -35,6 +35,10 @@
 #define APP_FLASH_DEBUG_EN 0
 #endif
 
+#ifndef APP_MCU_POLL_ENABLE
+#define APP_MCU_POLL_ENABLE 0
+#endif
+
 #ifndef APP_DEEP_ANA_REG
 #define APP_DEEP_ANA_REG DEEP_ANA_REG0 // used deep ana reg (can store u8 data when down/deep sleeping)
 #endif
@@ -62,8 +66,12 @@ void app_flash_init_normal(void)
 	// flash config sector
 	flash_sector_app_config = CFG_ADR_APP_512K_FLASH;
 	if (blc_flash_capacity == FLASH_SIZE_1M)   flash_sector_app_config = CFG_ADR_APP_1M_FLASH;
-    DEBUGFMT(APP_FLASH_DEBUG_EN, "[FLS] Flash init: MAC at %X", flash_sector_mac_address );
-    DEBUGFMT(APP_FLASH_DEBUG_EN, "[FLS] Flash init: CONFIG at %X", flash_sector_app_config );
+	#if (APP_FLASH_DEBUG_EN)
+    DEBUGFMT(APP_FLASH_DEBUG_EN, "[FLS] Flash init: MAC at %X", flash_sector_mac_address);
+    DEBUGFMT(APP_FLASH_DEBUG_EN, "[FLS] Flash init: CONFIG at %X", flash_sector_app_config);
+    u32 uMultiBootAddr = blc_ota_getCurrentUsedMultipleBootAddress();
+    DEBUGFMT(APP_FLASH_DEBUG_EN, "[FLS] MultiBootAddr: %X", uMultiBootAddr);
+	#endif
 }
 
 _attribute_ram_code_ void app_flash_init_deepRetn(void)
@@ -153,7 +161,7 @@ asm(".global __PM_DEEPSLEEP_RETENTION_ENABLE");
 //      write 256 bytes:  1.3 ms
 
 #define APP_CFG_MAGIC 0x70706168
-#define APP_CFG_VERSION 1
+#define APP_CFG_VERSION 2
 
 typedef struct _attribute_packed_ _appconfig_v0_t {
 	u32 magic; // magic to check if config is valid
@@ -176,7 +184,23 @@ typedef struct _attribute_packed_ _appconfig_v1_t {
 	u8  reserved2;
 } appconfig_v1_t;
 
-#define appconfig_t appconfig_v1_t
+typedef struct _attribute_packed_ _appconfig_v2_t {
+	u32 magic; // magic to check if config is valid
+	u16 version; // =2
+	u16 reserved1; // reserved for future use
+	u8  bth_key_init[16];
+	// config values
+	u8  bth_key_gatt[16];
+	u32 pincode;
+	u8  powerlevel; // dbm + 30
+	u8  mode;
+	u8  dataformat;
+	u8  reserved2;
+	u16 mcupollinterval;
+	u16 reserved3;
+} appconfig_v2_t;
+
+#define appconfig_t appconfig_v2_t
 
 #define APP_CFG_DEFAULT_U8  0xFF
 #define APP_CFG_DEFAULT_U16 0xFFFF
@@ -189,7 +213,7 @@ _attribute_data_retention_  u8 app_config_dirty = APP_CFG_DIRTY_NO;
 enum { APP_CFG_BTH_KEY_NONE=0, APP_CFG_BTH_KEY_INIT, APP_CFG_BTH_KEY_GATT };
 _attribute_data_retention_	u8 app_config_bth_key_type = APP_CFG_BTH_KEY_NONE;
 
-static void config_set_val(u8 *dest, const u8 *src, u8 len)
+_attribute_optimize_size_ static void config_set_val(u8 *dest, const u8 *src, u8 len)
 {
 	u8 u, val_old, val_new;
 	for (u=0; u<len; u++)
@@ -224,6 +248,14 @@ static bool inline isKeyValid(const u8* pKey)
 	return isAppMemValid(pKey, 16);
 }
 
+/*
+static void inline copyKeyReverse(u8 *dest, const u8 *src)
+{
+	for (u8 u=0; u<16; u++)
+		dest[15-u]=src[u];
+}
+*/
+
 static void config_update_keytype(void)
 {
 	if (isKeyValid(app_config.bth_key_gatt))
@@ -257,8 +289,11 @@ void app_config_init(void)
 	    	len_org=sizeof(appconfig_v0_t);
 	    else if (app_config.version==1)
 	    	len_org=sizeof(appconfig_v1_t);
+	    else if (app_config.version==2)
+	    	len_org=sizeof(appconfig_v2_t);
 	    if (len_org>0 && len_org<sizeof(app_config))
 	    	memset(pcfg+len_org, APP_CFG_DEFAULT_U8, sizeof(app_config)-len_org);
+	    app_config.version = APP_CFG_VERSION;
 		app_config_dirty = APP_CFG_DIRTY_ALL;
 	}
 	app_config_flush();
@@ -272,6 +307,7 @@ void app_config_init(void)
     DEBUGFMT(APP_FLASH_LOG_EN, "[FLS] Cfg: powerlevel %u (0x%02X)", app_config_get_power_level(), app_config.powerlevel);
     DEBUGFMT(APP_FLASH_LOG_EN, "[FLS] Cfg: mode %u (0x%02X)", app_config_get_mode(), app_config.mode);
     DEBUGFMT(APP_FLASH_LOG_EN, "[FLS] Cfg: format %u (0x%02X)", app_config_get_dataformat(), app_config.dataformat);
+    DEBUGFMT(APP_FLASH_LOG_EN, "[FLS] Cfg: mcupoll %u (0x%02X)", app_config_get_mcupollinterval(), app_config.mcupollinterval);
 	#endif
 }
 
@@ -330,6 +366,7 @@ void app_config_get_key(u8 *key)
 
 void app_config_set_key(const u8 *key)
 {
+	// u8 key[16]; copyKeyReverse(key, key_rev);
 	config_set_val(app_config.bth_key_gatt, key, 16);
 	config_update_keytype();
 }
@@ -375,7 +412,7 @@ void app_config_set_power_level(signed char level_dbm)
 
 u8 app_config_get_mode(void)
 {
-	if (app_config.mode == APP_CFG_DEFAULT_U8 )   return DEVMODE_DEFAULT;
+	if (app_config.mode == APP_CFG_DEFAULT_U8)   return DEVMODE_DEFAULT;
 	return app_config.mode;
 }
 
@@ -387,7 +424,7 @@ void app_config_set_mode(u8 mode)
 
 u8 app_config_get_dataformat(void)
 {
-	if (app_config.dataformat == APP_CFG_DEFAULT_U8 )   return DATAFORMAT_DEFAULT;
+	if (app_config.dataformat == APP_CFG_DEFAULT_U8)   return DATAFORMAT_DEFAULT;
 	return app_config.dataformat;
 }
 
@@ -396,6 +433,23 @@ void app_config_set_dataformat(u8 datafmt)
 	config_set_val((u8*)&app_config.dataformat, (u8*)&datafmt, 1);
 }
 
+u16 app_config_get_mcupollinterval(void)
+{
+    #if (APP_MCU_POLL_ENABLE)
+	u16 pollinterval=app_config.mcupollinterval;
+	if (pollinterval == APP_CFG_DEFAULT_U16)   return MCUPOLLINTERVAL_DEFAULT;
+	if (pollinterval>0 && pollinterval<30)  pollinterval=30;
+	else if (pollinterval>3600)             pollinterval=3600;
+	return pollinterval;
+	#else
+	return 0;
+	#endif
+}
+
+void app_config_set_mcupollinterval(u16 pollinterval)
+{
+	config_set_val((u8*)&app_config.mcupollinterval, (u8*)&pollinterval, 2);
+}
 
 
 

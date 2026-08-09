@@ -68,17 +68,19 @@ _attribute_ram_code_ void app_init_deepRetn(void);
 _attribute_no_inline_ void app_main_loop(void);
 u32 app_sec_time(void); // seconds timer for longer intervals
 bool app_sec_time_exceeds(u32 ref, u32 sec);
-enum { APP_NOTIFY_NONE=0, APP_NOTIFY_DPDATA, APP_NOTIFY_PRODUCTID, APP_NOTIFY_BATTERYVOLTAGE, APP_NOTIFY_BATTERYLOW,
+enum { APP_NOTIFY_NONE=0, APP_NOTIFY_DPDATA, APP_NOTIFY_DPDATA_REPORT, APP_NOTIFY_PRODUCTID, APP_NOTIFY_BATTERYVOLTAGE, APP_NOTIFY_BATTERYLOW,
 	   APP_NOTIFY_FACTORYRESET, APP_NOTIFY_REBOOT,
 	   APP_NOTIFY_CONNSTATE, APP_NOTIFY_BUTTONPRESS };
 void app_notify(u8 evt, const u8 *data, u16 datalen);
 
 // app_debug.c
-void app_debug_init(void);
+void app_debug_init(u8 deepRetn);
+void app_debug_nextline(void);
 #if (APP_DEBUG_ENABLE)
-#define DEBUGSTR(en,info) if(en){tlk_printf("%s\n", info);} // (enable, info)
-#define DEBUGFMT(en,fmt,...) if(en){tlk_printf(fmt, ##__VA_ARGS__);putchar('\n');} // tlkapi_printf(enable, fmt, ...)
-#define DEBUGHEXBUF(en,info,buf,len) if(en){tlkapi_send_str_data(info,(u8 *)(buf),len);putchar('\n');} // tlkapi_send_string_data(enable, info, data*, datalen)
+void DBGBRK(void);
+#define DEBUGSTR(en,info) if(en){DBGBRK();tlk_printf("%s\n", info);} // (enable, info)
+#define DEBUGFMT(en,fmt,...) if(en){DBGBRK();tlk_printf(fmt, ##__VA_ARGS__);putchar('\n');} // tlkapi_printf(enable, fmt, ...)
+#define DEBUGHEXBUF(en,info,buf,len) if(en){DBGBRK();tlkapi_send_str_data(info,(u8 *)(buf),len);putchar('\n');} // tlkapi_send_string_data(enable, info, data*, datalen)
 #define DEBUGOUT(c) putchar(c)
 void DEBUGOUTHEX(u8 u);
 void DEBUGOUTSTR(const char *txt);
@@ -88,6 +90,7 @@ int tlk_printf(const char *format, ...);
 void tlkapi_send_str_data (char *str, u8 *pData, u32 data_len);
 #define tlkapi_printf(en, fmt, ...)	if(en){tlk_printf(fmt, ##__VA_ARGS__);}
 #else
+#define DBGBRK(...)			((void)0)
 #define DEBUGSTR(...)		((void)0)
 #define DEBUGFMT(...)		((void)0)
 #define DEBUGHEXBUF(...)	((void)0)
@@ -116,8 +119,8 @@ void app_config_flush(void);
 const u8* app_config_get_bthome_key(void);
 u32 app_config_get_pincode(void);
 void app_config_set_pincode(u32 pin);
-void app_config_get_key(u8 *key);
-void app_config_set_key(const u8 *key);
+void app_config_get_key(u8 *key_rev);
+void app_config_set_key(const u8 *key_rev);
 u8 app_config_create_key(const u8 *randbase);
 void app_config_delete_key(void);
 signed char app_config_get_power_level(void);
@@ -128,6 +131,9 @@ u8 app_config_get_mode(void);
 enum {DATAFORMAT_DEFAULT=0, DATAFORMAT_BTHOME_V1=1, DATAFORMAT_BTHOME_V2=2, DATAFORMAT_XIAOMI=4};
 void app_config_set_dataformat(u8 mode);
 u8 app_config_get_dataformat(void);
+enum {MCUPOLLINTERVAL_DEFAULT=0};
+u16 app_config_get_mcupollinterval(void);
+void app_config_set_mcupollinterval(u16 pollinterval);
 
 // app_battery.c
 #if (APP_BATTERY_CHECK)
@@ -145,6 +151,8 @@ u8 app_ble_loop(void);
 void app_ble_init_device_name(const char* devname);
 u8 app_ble_get_security_level(void);
 u8 app_ble_device_connected(void);
+u8 app_ble_device_connected_secure(void);
+u8 app_ble_device_connected_secure_auth(void);
 void app_ble_device_disconnect(void);
 void app_ble_device_reset_conn_timeout(void);
 void app_ble_device_disconnect_restart(void);
@@ -174,13 +182,16 @@ void app_ble_att_set_xiaomi_data(const u8 *data, u8 len);
 void mcu_wakeup_init(void);
 _attribute_ram_code_ void mcu_wakeup_init_deepRetn(void);
 _attribute_ram_code_ u8 module_wakeup_status();
+_attribute_optimize_size_ void app_serial_set_baudrate(u16 baud);
 void app_serial_init_normal(void);
 void app_serial_init_deepRetn(void);
 u8 app_serial_loop(void);
 u8 app_serial_rxtx_busy(void);
 enum {
-	MCU_CMD_SEQ_NONE=0, MCU_CMD_SEQ_INIT, MCU_CMD_SEQ_START_MEASURE,
+	MCU_CMD_SEQ_NONE=0, MCU_CMD_SEQ_INIT,
 	MCU_CMD_SEQ_START_CONNECT, MCU_CMD_SEQ_UPDATE_CONNECT,
+	MCU_CMD_SEQ_START_MEASURE,
+	MCU_CMD_SEQ_START_POLL, MCU_CMD_SEQ_END_POLL,
 	MCU_CMD_SEQ_CHECKSTAT
 };
 void app_serial_cmd_seq_start(u8 cmd_seq, u32 delay);

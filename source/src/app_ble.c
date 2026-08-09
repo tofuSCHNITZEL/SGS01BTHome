@@ -119,8 +119,9 @@ int app_ble_set_sensor_data(u8 vt, int val, char digits)
 	if (vt==VT_BATTERY_PERCENT) {
 		val=sensordata_adjust_digits(val, digits, 0);
 		if (val<0 || val>100)    return -1;
-		if ((sensor_data.flags&DATA_FLAG_BAT)!=0 && val==sensor_data.batterypercent)   return 0;
-		DEBUGFMT(APP_BLE_LOG_EN, "[BLE] Data battery %u %%", val);
+		bool changed=((sensor_data.flags&DATA_FLAG_BAT)==0 || val!=sensor_data.batterypercent);
+		DEBUGFMT(APP_BLE_LOG_EN, "[BLE] Data battery %u %% %s", val, changed?"(changed)":"");
+		if (!changed)    return 0;
 		sensor_data.batterypercent=(u8)val;
 		sensor_data.flags|=DATA_FLAG_BAT|DATA_FLAG_CHANGED;
 		#if (APP_BLE_ATT)
@@ -131,8 +132,9 @@ int app_ble_set_sensor_data(u8 vt, int val, char digits)
 	if (vt==VT_TEMPERATURE) {
 		val=sensordata_adjust_digits(val, digits, 2);
 		if (val<INT16_MIN || val>INT16_MAX)    return -1;
-		if ((sensor_data.flags&DATA_FLAG_TEMP)!=0 && val==sensor_data.temperature)   return 0;
-		DEBUGFMT(APP_BLE_LOG_EN, "[BLE] Data temperature %d.%02u C", val/100, abs(val)%100);
+		bool changed=((sensor_data.flags&DATA_FLAG_TEMP)==0 || val!=sensor_data.temperature);
+		DEBUGFMT(APP_BLE_LOG_EN, "[BLE] Data temperature %d.%02u C %s", val/100, abs(val)%100, changed?"(changed)":"");
+		if (!changed)    return 0;
 		sensor_data.temperature=(short)val;
 		sensor_data.flags|=DATA_FLAG_TEMP|DATA_FLAG_CHANGED;
 		return 1;
@@ -140,8 +142,9 @@ int app_ble_set_sensor_data(u8 vt, int val, char digits)
 	if (vt==VT_VOLTAGE) {
 		val=sensordata_adjust_digits(val, digits, 3);
 		if (val<0 || val>UINT16_MAX)    return -1;
-		if ((sensor_data.flags&DATA_FLAG_VOLT)!=0 && val==sensor_data.voltage)   return 0;
-		DEBUGFMT(APP_BLE_LOG_EN, "[BLE] Data voltage %d mV", val);
+		bool changed=((sensor_data.flags&DATA_FLAG_VOLT)==0 || val!=sensor_data.voltage);
+		DEBUGFMT(APP_BLE_LOG_EN, "[BLE] Data voltage %d mV %s", val, changed?"(changed)":"");
+		if (!changed)    return 0;
 		sensor_data.voltage=(u16)val;
 		sensor_data.flags|=DATA_FLAG_VOLT|DATA_FLAG_CHANGED;
 		return 1;
@@ -149,8 +152,9 @@ int app_ble_set_sensor_data(u8 vt, int val, char digits)
 	if (vt==VT_MOISTURE) {
 		val=sensordata_adjust_digits(val, digits, 2);
 		if (val<0 || val>100*100)    return -1;
-		if ((sensor_data.flags&DATA_FLAG_MOIST)!=0 && val==sensor_data.moisture)   return 0;
-		DEBUGFMT(APP_BLE_LOG_EN, "[BLE] Data moisture %d.%02u %%", val/100, abs(val)%100);
+		bool changed=((sensor_data.flags&DATA_FLAG_MOIST)==0 || val!=sensor_data.moisture);
+		DEBUGFMT(APP_BLE_LOG_EN, "[BLE] Data moisture %d.%02u %% %s", val/100, abs(val)%100, changed?"(changed)":"");
+		if (!changed)    return 0;
 		sensor_data.moisture=(u16)val;
 		sensor_data.flags|=DATA_FLAG_MOIST|DATA_FLAG_CHANGED;
 		return 1;
@@ -277,7 +281,7 @@ typedef struct _attribute_packed_ _bthome_nonce_t { // for encryption
 #define BTHOME_V1_DATA_INT		0x20
 #define BTHOME_V1_DATA_FLOAT	0x40
 
-_attribute_optimize_size_ static int ble_build_adv_bthome_v1(void)
+static int ble_build_adv_bthome_v1(void)
 {   // BTHome V1 format is depreciated
 	if (ble_advSensorDataLen>0 && (sensor_data.flags&DATA_FLAG_CHANGED)==0)
 		return 0; // no change
@@ -488,7 +492,7 @@ _attribute_optimize_size_ static int ble_build_adv_xiaomi(void)
 	#if (APP_BLE_ATT)
 	app_ble_att_set_xiaomi_data(ble_advSensorData+data_ofs, data_len);
 	#endif
-	ble_advSensorData[len_ofs]+=data_len; // add adata length
+	ble_advSensorData[len_ofs]+=data_len; // add data length
 	ble_advSensorDataLen=u;
 	sensor_data.flags&=(~DATA_FLAG_CHANGED); // reset changed flag
 	return 1;
@@ -512,7 +516,10 @@ static int ble_build_adv_sensordata(void)
 // BLE stack states / callbacks
 //
 enum { DEV_CONN_STATE_NONE=0,
-	   DEV_CONN_STATE_CONNECTED=BIT(0), DEV_CONN_STATE_ENCRYPTED=BIT(1), DEV_CONN_STATE_SECURED=BIT(2),
+	   DEV_CONN_STATE_CONNECTED=BIT(0),
+	   DEV_CONN_STATE_ENCRYPTED=BIT(1),
+	   DEV_CONN_STATE_SECURED=BIT(2),
+	   DEV_CONN_STATE_AUTHENTIFIED=BIT(3),
 	   DEV_CONN_STATE_REBOOT_ON_DISCONNECT=BIT(7)};
 _attribute_data_retention_ u8 ble_device_connection_state = DEV_CONN_STATE_NONE;
 _attribute_data_retention_ u8 ble_security_level = No_Security;
@@ -549,11 +556,20 @@ _attribute_optimize_size_ void ble_set_conn_state(u8 state)
 	if (state==DEV_CONN_STATE_NONE || state==DEV_CONN_STATE_CONNECTED)
 		ble_device_connection_state=state;
 	if (ble_device_connection_state & DEV_CONN_STATE_CONNECTED)
-	{ 	// add conn state info
+	{ 	// add connection info
 		ble_device_connection_state |= state;
 	}
 	if (ble_device_connection_state != state_old)
 	{
+		#if (APP_BLE_LOG_EN)
+		u8 s=ble_device_connection_state;
+		const char *dbg_state=((s & DEV_CONN_STATE_CONNECTED) ? "connected" : "disconnected");
+		const char *dbg_enc=((s & DEV_CONN_STATE_ENCRYPTED) ? " enc" : "");
+		const char *dbg_sec=((s & DEV_CONN_STATE_SECURED) ? " sec" : "");
+		const char *dbg_auth=((s & DEV_CONN_STATE_AUTHENTIFIED) ? " auth" : "");
+		const char *dbg_reboot=((s & DEV_CONN_STATE_REBOOT_ON_DISCONNECT) ? " | reboot" : "");
+		DEBUGFMT(APP_BLE_LOG_EN, "[BLE] Connection state: %s%s%s%s%s", dbg_state, dbg_enc, dbg_sec, dbg_auth, dbg_reboot);
+		#endif
 		u8 n[2]; n[0]=ble_device_connection_state; n[1]=state_old;
 	    app_notify(APP_NOTIFY_CONNSTATE, n, 2);
 	}
@@ -569,28 +585,44 @@ _attribute_ram_code_ int ble_advertise_prepare_handler(rf_packet_adv_t * p)
 }
 
 // callback function of LinkLayer Event BLT_EV_FLAG_SUSPEND_ENTER
-void  ble_task_sleep_enter (u8 e, u8 *p, int n)
+_attribute_no_inline_ void ble_task_sleep_enter(u8 e, u8 *p, int n)
 {
 	(void)e;(void)p;(void)n;
-	// must: resetted? by pm before enter sleep
+	// must: ?resetted? by pm before enter sleep
 	bls_pm_setWakeupSource(PM_WAKEUP_PAD | PM_WAKEUP_TIMER);
 }
 
 // callback function of LinkLayer Event BLT_EV_FLAG_CONNECT
-void ble_task_connect (u8 e, u8 *p, int n)
+_attribute_no_inline_ void ble_task_connect(u8 e, u8 *p, int n)
 {
-	(void)e;(void)p;(void)n;
+	(void)e; (void)n;
 	#if (APP_BLE_EVENT_LOG_EN)
 	tlk_contr_evt_connect_t *pConnEvt = (tlk_contr_evt_connect_t *)p;
-	DEBUGHEXBUF(APP_BLE_EVENT_LOG_EN, "[BLE] evt connect, intA & advA: %s", pConnEvt->initA, sizeof(tlk_contr_evt_connect_t));
+	DEBUGHEXBUF(APP_BLE_EVENT_LOG_EN, "[BLE] evt connect, intA & advA: %s", (u8 *)pConnEvt, sizeof(tlk_contr_evt_connect_t));
 	#endif
+//TODO   this check does not work, if the client uses a random id to reconnect
+/*
+	u8 bondcnt=blc_smp_param_getCurrentBondingDeviceNumber();
+	if (bondcnt > 0)
+	{
+        tlk_contr_evt_connect_t *pConnEvt = (tlk_contr_evt_connect_t *)p;
+		smp_param_save_t smp_param; u32	ret = bls_smp_param_loadByAddr(0, pConnEvt->initA, &smp_param);
+		if (ret == 0)
+		{
+			DEBUGHEXBUF(APP_BLE_LOG_EN, "[BLE] Reject conn from unknown host: %s", pConnEvt->initA, 6);
+			bls_ll_terminateConnection(0x11); // 0x11 "unsupported"
+			return;
+		}
+	}
+*/
+	DEBUGHEXBUF(APP_BLE_LOG_EN, "[BLE] Connection request from %s", pConnEvt->initA, 6);
 	bls_l2cap_requestConnParamUpdate(CONN_INTERVAL_10MS, CONN_INTERVAL_15MS, 99, CONN_TIMEOUT_4S); // 1 sec (must: max_interval>min_interval)
 	ble_connection_timeout = app_sec_time(); if (ble_connection_timeout<1)   ble_connection_timeout=1;
 	ble_set_conn_state(DEV_CONN_STATE_CONNECTED);
 }
 
 // callback function of LinkLayer Event BLT_EV_FLAG_TERMINATE
-void ble_task_terminate(u8 e, u8 *p, int n) //*p is terminate reason
+_attribute_no_inline_ void ble_task_terminate(u8 e, u8 *p, int n) //*p is terminate reason
 {
 	(void)e;(void)n;
 	#if (APP_BLE_EVENT_LOG_EN)
@@ -615,14 +647,14 @@ void ble_task_terminate(u8 e, u8 *p, int n) //*p is terminate reason
 }
 
 // callback function of LinkLayer Event BLT_EV_FLAG_SUSPEND_EXIT
-void ble_task_suspend_exit(u8 e, u8 *p, int n)
+_attribute_no_inline_ void ble_task_suspend_exit(u8 e, u8 *p, int n)
 {
 	(void)e;(void)p;(void)n;
 	rf_set_power_level_index(ble_rf_power_level); // restore rf power level
 }
 
 // callback function (LinkLayer Event BLT_EV_FLAG_DATA_LENGTH_EXCHANGE)
-void ble_task_dle_exchange(u8 e, u8 *p, int n)
+_attribute_no_inline_ void ble_task_dle_exchange(u8 e, u8 *p, int n)
 {
 	#if (APP_BLE_EVENT_LOG_EN)
 	tlk_contr_evt_dataLenExg_t* pEvt = (tlk_contr_evt_dataLenExg_t*)p;
@@ -630,7 +662,7 @@ void ble_task_dle_exchange(u8 e, u8 *p, int n)
 	#endif
 }
 // callback function (Host Events)
-int ble_host_event_callback(u32 h, u8 *para, int n)
+_attribute_no_inline_ int ble_host_event_callback(u32 h, u8 *para, int n)
 {
 	u8 event = (h & 0xFF);
 	switch(event)
@@ -638,7 +670,7 @@ int ble_host_event_callback(u32 h, u8 *para, int n)
 		case GAP_EVT_SMP_PAIRING_BEGIN:
 		{
 			gap_smp_pairingBeginEvt_t *pEvt = (gap_smp_pairingBeginEvt_t *)para;
-			DEBUGFMT(APP_SMP_LOG_EN, "[BLE] SMP paring begin: conn %u, secure %u, tk-method %u", pEvt->connHandle, pEvt->secure_conn, pEvt->tk_method);
+			DEBUGFMT(APP_SMP_LOG_EN, "[BLE] Event pairing begin: conn %u, secure %u, tk-method %u", pEvt->connHandle, pEvt->secure_conn, pEvt->tk_method);
 			//DEBUGHEXBUF(APP_SMP_LOG_EN, "[BLE] SMP paring begin: %s", pEvt, sizeof(gap_smp_pairingBeginEvt_t));
 			u32 pincode=app_config_get_pincode();
 			blc_smp_manualSetPinCode_for_debug(pEvt->connHandle,pincode); // using fix pincode
@@ -646,16 +678,37 @@ int ble_host_event_callback(u32 h, u8 *para, int n)
 		case GAP_EVT_SMP_PAIRING_SUCCESS:
 		{
 			gap_smp_pairingSuccessEvt_t *pEvt = (gap_smp_pairingSuccessEvt_t *)para;
-			DEBUGHEXBUF(APP_SMP_LOG_EN, "[BLE] SMP paring success: %s", pEvt, sizeof(gap_smp_pairingSuccessEvt_t));
 			u8 security_level=app_ble_get_security_level();
+			DEBUGFMT(APP_SMP_LOG_EN, "[BLE] Event pairing success: conn %u, level %u, bond %u, bond-ret %u", pEvt->connHandle, security_level, pEvt->bonding, pEvt->bonding_result);
 			if (security_level==Authenticated_Pairing_with_Encryption && pEvt->bonding==1)
 			{
 				#if (APP_BLE_ATT)
-				u8 ok=0; smp_param_save_t bondInfo; bls_smp_param_loadByIndex(0, &bondInfo);
-				if(isIrkValid(bondInfo.peer_irk))
-					ok=app_config_create_key(0);
+				u8 ok=0, bondindex = 0;
+				smp_param_save_t bondInfo; u32 faddr = bls_smp_param_loadByIndex(bondindex, &bondInfo);
+				#if (APP_SMP_LOG_EN)
+				u8 bondnr= blc_smp_param_getCurrentBondingDeviceNumber();
+				DEBUGFMT(APP_SMP_LOG_EN, "[BLE] Bond nr: %u, flash addr: %08X", bondnr, faddr);
+				DEBUGHEXBUF(APP_SMP_LOG_EN, "[BLE] Peer-Addr: %s", bondInfo.peer_addr, 6);
+				DEBUGHEXBUF(APP_SMP_LOG_EN, "[BLE] Peer-IRK: %s", bondInfo.peer_irk, 16);
+				DEBUGHEXBUF(APP_SMP_LOG_EN, "[BLE] Local-IRK: %s", bondInfo.local_irk, 16);
+				#endif
+				if(isIrkValid(bondInfo.peer_irk) && faddr>0)
+				{
+					DEBUGFMT(APP_SMP_LOG_EN, "[BLE] Bond %u valid", bondindex);
+					ok=app_config_create_key(bondInfo.peer_irk);
+				}
+				else
+				{
+					DEBUGFMT(APP_SMP_LOG_EN, "[BLE] Bond %u invalid/not secure", bondindex);
+					bls_ll_terminateConnection(0x0E); // 0x0E: connection rejected due to security reasons
+					bls_smp_eraseAllPairingInformation();
+					pEvt->bonding_result=0;
+				}
 				if (ok)
+				{
+					DEBUGFMT(APP_SMP_LOG_EN, "[BLE] EncryptionKey created");
 					app_ble_att_setup_config();
+				}
 				sensordata_increment_packetid(); // rebuild BTHome adv data
 				#endif
 			}
@@ -664,85 +717,105 @@ int ble_host_event_callback(u32 h, u8 *para, int n)
 		{
 			#if (APP_SMP_LOG_EN)
 			gap_smp_pairingFailEvt_t *pEvt = (gap_smp_pairingFailEvt_t *)para;
-			DEBUGHEXBUF(APP_SMP_LOG_EN, "[BLE] SMP paring fail: %s", pEvt, sizeof(gap_smp_pairingFailEvt_t));
+			DEBUGHEXBUF(APP_SMP_LOG_EN, "[BLE] Event pairing fail: %s", pEvt, sizeof(gap_smp_pairingFailEvt_t));
 			#endif
 		} break;
 		case GAP_EVT_SMP_CONN_ENCRYPTION_DONE:
-		{	// gap_smp_connEncDoneEvt_t *pEvt = (gap_smp_connEncDoneEvt_t *)para;
-			DEBUGSTR(APP_SMP_LOG_EN, "[BLE] evt SMP encryption done");
+		{
+			#if (APP_SMP_LOG_EN)
+			gap_smp_connEncDoneEvt_t *pEvt = (gap_smp_connEncDoneEvt_t *)para;
+			DEBUGFMT(APP_SMP_LOG_EN, "[BLE] Event encryption done: conn=%u, reconnect=%u", pEvt->connHandle, pEvt->re_connect);
+			#endif
 			ble_set_conn_state(DEV_CONN_STATE_ENCRYPTED);
 		} break;
 		case GAP_EVT_SMP_SECURITY_PROCESS_DONE:
-		{	// gap_smp_securityProcessDoneEvt_t *pEvt = (gap_smp_securityProcessDoneEvt_t *)para;
-			DEBUGSTR(APP_SMP_LOG_EN, "[BLE] evt security done");
+		{
+			u8 security_level=app_ble_get_security_level();
+			u8 conn_stat = DEV_CONN_STATE_SECURED;
+			#if (APP_SMP_LOG_EN)
+			gap_smp_securityProcessDoneEvt_t *pEvt = (gap_smp_securityProcessDoneEvt_t *)para;
+			DEBUGFMT(APP_SMP_LOG_EN, "[BLE] Event security done: conn=%u reconnect=%u (sec_level %u)", pEvt->connHandle, pEvt->re_connect, security_level);
+			#endif
 			ble_set_conn_state(DEV_CONN_STATE_SECURED);
+			if ((security_level&Authenticated_Pairing_with_Encryption)!=0 ||
+				(security_level&Authenticated_LE_Secure_Connection_Pairing_with_Encryption)!=0 ||
+				(security_level&Authenticated_Pairing_with_Data_Signing)!=0)
+				conn_stat |= DEV_CONN_STATE_AUTHENTIFIED;
+			ble_set_conn_state(conn_stat);
 		} break;
 		case GAP_EVT_SMP_TK_DISPLAY:
 		{	// u32 *pinCode = (u32*) para;
-			DEBUGFMT(APP_SMP_LOG_EN, "[BLE] evt TK display: %u", *(u32*)para);
+			DEBUGFMT(APP_SMP_LOG_EN, "[BLE] Event TK display: %u", *(u32*)para);
 		} break;
 		case GAP_EVT_SMP_TK_REQUEST_PASSKEY:
 		{	// para = NULL
-			DEBUGSTR(APP_SMP_LOG_EN, "[BLE] evt TK request passkey");
+			DEBUGSTR(APP_SMP_LOG_EN, "[BLE] Event TK request passkey");
 		} break;
 		case GAP_EVT_SMP_TK_REQUEST_OOB:
 		{	// para = NULL
-			DEBUGSTR(APP_SMP_LOG_EN, "[BLE] evt TK request OOB");
+			DEBUGSTR(APP_SMP_LOG_EN, "[BLE] Event TK request OOB");
 		} break;
 		case GAP_EVT_SMP_TK_NUMERIC_COMPARE:
 		{	// u32 *pinCode = (u32*) para; blc_smp_setNumericComparisonResult(1);
 			#if (APP_SMP_LOG_EN)
 			u32 pinCode = MAKE_U32(para[3], para[2], para[1], para[0]);
-			DEBUGFMT(APP_SMP_LOG_EN, "[BLE] evt TK compare: %u", pinCode);
+			DEBUGFMT(APP_SMP_LOG_EN, "[BLE] Event TK compare: %u", pinCode);
 			#endif
 		} break;
 		case GAP_EVT_ATT_EXCHANGE_MTU:
 		{
 			#if (APP_SMP_LOG_EN)
 			gap_gatt_mtuSizeExchangeEvt_t *pEvt = (gap_gatt_mtuSizeExchangeEvt_t *)para;
-			DEBUGHEXBUF(APP_HOST_EVENT_LOG_EN, "[BLE] MTU exchange %s", pEvt, sizeof(gap_gatt_mtuSizeExchangeEvt_t));
+			DEBUGHEXBUF(APP_HOST_EVENT_LOG_EN, "[BLE] Event: MTU exchange %s", pEvt, sizeof(gap_gatt_mtuSizeExchangeEvt_t));
 			#endif
 		} break;
 		case GAP_EVT_GATT_HANDLE_VALUE_CONFIRM:
 		{	// para = NULL
-			DEBUGSTR(APP_SMP_LOG_EN, "[BLE] evt value confirm");
+			DEBUGSTR(APP_SMP_LOG_EN, "[BLE] Event: GATT value confirm");
 		} break;
 		default:
-			break;
+		{
+			DEBUGFMT(APP_SMP_LOG_EN, "[BLE] Event %u", event);
+		}	break;
 	}
 	return 0;
 }
 
 #if (BLE_OTA_SERVER_ENABLE)
 // callback function for OTA start
-void app_enter_ota_mode(void)
+_attribute_no_inline_ void app_enter_ota_mode(void)
 {
 	DEBUGSTR(APP_OTA_LOG_EN, "[APP] OTA start");
 	if(ble_ota_is_working != BLE_OTA_EXTENDED)
 		ble_ota_is_working = BLE_OTA_WORK;
 	bls_pm_setManualLatency(0);
-	blc_ota_setOtaProcessTimeout( 5*60 ); // 5 min
 	app_ble_device_reset_conn_timeout();
 }
 
 // callback function for OTA end
-_attribute_optimize_size_ void app_ota_end_result(int result)
+_attribute_no_inline_ void app_ota_end_result(int result)
 {
 	DEBUGFMT(APP_OTA_LOG_EN, "[APP] OTA end: result %d", result);
-	if (result != 0)
-	{
-		DEBUGSTR(APP_BLE_LOG_EN, "[APP] OTA failed");
-		app_ble_device_reset_conn_timeout();
-	}
+	if (result != 0)   DEBUGSTR(APP_BLE_LOG_EN, "[APP] OTA failed");
+	app_ble_device_reset_conn_timeout();
 	ble_ota_is_working = BLE_OTA_NONE;
 }
+
+// callback function for OTA firmware version request (0xFF04 CMD_OTA_FW_VERSION_REQ)
+#ifdef BLE_OTA_FW_VERSION
+_attribute_no_inline_ void app_ota_firmware_version_req(void)
+{
+	DEBUGSTR(APP_OTA_LOG_EN, "[APP] OTA FW version request");
+}
+#endif
+
 
 // must: -> referenced by BLE stack OTA server
 _attribute_ble_data_retention_	_attribute_aligned_(4)	flash_prot_op_callback_t flash_prot_op_cb = NULL;
 #endif
 
 // setup adv for different states
-_attribute_optimize_size_ void app_ble_setup_adv(u8 adv_mode)
+void app_ble_setup_adv(u8 adv_mode)
 {
 	u8 adv_enable=BLC_ADV_DISABLE; ble_sts_t adv_param_ret=BLE_SUCCESS; smp_param_save_t bondInfo;
 	u8 bond_number = blc_smp_param_getCurrentBondingDeviceNumber();  // get bonded device number
@@ -908,11 +981,16 @@ _attribute_optimize_size_ void app_ble_init_normal(void)
 	#if (BLE_OTA_SERVER_ENABLE)
 	// blc_debug_addStackLog(STK_LOG_OTA_FLOW);
 	blc_ota_initOtaServer_module();
-	// blc_ota_setOtaProcessTimeout(30);   //OTA process timeout:  30 seconds
-	// blc_ota_setOtaDataPacketTimeout(4);	//OTA data packet timeout:  4 seconds
-	// bls_ota_clearNewFwDataArea();
+	blc_ota_setOtaProcessTimeout( 5*60 ); // 5 min
+	blc_ota_setOtaDataPacketTimeout( 20 ); // 20 ms packet timeout
+	// bls_ota_clearNewFwDataArea();// recommended to use anymore
 	blc_ota_registerOtaStartCmdCb(app_enter_ota_mode);
 	blc_ota_registerOtaResultIndicationCb(app_ota_end_result);
+	// blc_ota_setNewFirmwwareStorageAddress(...); // must be in main.c before init
+	#ifdef BLE_OTA_FW_VERSION
+	blc_ota_setFirmwareVersionNumber(OTA_FW_VERSION);
+	blc_ota_registerOtaFirmwareVersionReqCb(app_ota_firmware_version_req);
+	#endif
 	#endif
 	// ADV setup
 	ble_setup_adv_localname(0, ble_mac_public, ble_scanRsp, sizeof(ble_scanRsp));
@@ -935,6 +1013,8 @@ _attribute_ram_code_ void app_ble_init_deepRetn(void)
 // ble main loop
 u8 app_ble_loop(void)
 {
+	if (ble_ota_is_working != BLE_OTA_NONE)
+		return APP_PM_DISABLE_SLEEP;
 	// check for BTHome value changes and update adv data
 	if (ble_adv_mode == BLE_ADV_MODE_SensorData)
 	{
@@ -966,20 +1046,24 @@ u8 app_ble_loop(void)
 		app_ble_delete_bond();
 		app_config_delete_key(); // delete encryption key
 	}
-	if (ble_ota_is_working != BLE_OTA_NONE)
-		return APP_PM_DISABLE_SLEEP;
 	return APP_PM_DEFAULT;
 }
 
 u8 app_ble_device_connected(void)
 {
-	return ble_device_connection_state;
+	return (ble_device_connection_state & DEV_CONN_STATE_CONNECTED);
 }
 
 u8 app_ble_device_connected_secure(void)
 {
-	u8 secureflags=DEV_CONN_STATE_CONNECTED|DEV_CONN_STATE_ENCRYPTED|DEV_CONN_STATE_SECURED;
+	const u8 secureflags=DEV_CONN_STATE_CONNECTED|DEV_CONN_STATE_ENCRYPTED|DEV_CONN_STATE_SECURED;
 	return ((ble_device_connection_state & secureflags)==secureflags)?1:0;
+}
+
+u8 app_ble_device_connected_secure_auth(void)
+{
+	const u8 secureauthflags=DEV_CONN_STATE_CONNECTED|DEV_CONN_STATE_ENCRYPTED|DEV_CONN_STATE_SECURED|DEV_CONN_STATE_AUTHENTIFIED;
+	return ((ble_device_connection_state & secureauthflags)==secureauthflags)?1:0;
 }
 
 void app_ble_device_disconnect(void)

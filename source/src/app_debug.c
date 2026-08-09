@@ -36,8 +36,19 @@
 #include "vendor/common/tlkapi_debug.c"
 #include "stack/ble/debug/debug.h"
 
+// internal: first log after sleep -> new line
+#if (APP_DEBUG_ENABLE)
+_attribute_data_retention_ u8 app_dbg_newline = 0;
+
+void DBGBRK(void)
+{
+	if (app_dbg_newline!=0)   putchar('\n');
+	app_dbg_newline = 0;
+}
+#endif
+
 // debug init
-void app_debug_init(void)
+void app_debug_init(u8 deepRetn)
 {
 	// gpio_set_func(DEBUG_SWS_PIN, AS_SWIRE);
     #if (APP_DEBUG_ENABLE)
@@ -46,7 +57,15 @@ void app_debug_init(void)
 	gpio_set_output_en(DEBUG_INFO_TX_PIN, 1);
 	tlkapi_debug_init();
     blc_debug_enableStackLog(STK_LOG_DISABLE);
+	if (deepRetn>0)  app_debug_nextline();
     #endif
+}
+
+void app_debug_nextline(void)
+{
+	#if (APP_DEBUG_ENABLE)
+	app_dbg_newline=1;
+	#endif
 }
 
 // debug helpers
@@ -77,7 +96,6 @@ void DEBUGOUTINT(int val, int digits)
 	}
 	while (ofs<sizeof(buf))   DEBUGOUT(buf[ofs++]);
 }
-
 #endif
 
 

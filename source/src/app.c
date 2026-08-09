@@ -42,6 +42,9 @@
 #define APP_SECTIMER_DEBUG_EN 0
 #endif
 
+#ifndef APP_MCU_POLL_ENABLE
+#define APP_MCU_POLL_ENABLE 0
+#endif
 
 // BLE stack RX/TX FIFO (must)
 #define RX_FIFO_SIZE	64 // CAL_LL_ACL_RX_BUF_SIZE(maxRxOct): maxRxOct + 22, then 16 byte align
@@ -64,10 +67,10 @@ static u32 app_state_clock = 0;
 #define APP_MCU_STATE_REFRESH_SEC 50
 static u32 app_mcustate_time = 0;
 
-enum { DEVICETYPE_None=0, DEVICETYPE_Unknown, DEVICETYPE_SGS01 };
+enum { DEVICETYPE_None=0, DEVICETYPE_Unknown, DEVICETYPE_SGS01, DEVICETYPE_SGS01B };
 static _attribute_data_retention_ u8 app_device_type = DEVICETYPE_None;
 #if (APP_LOG_EN)
-static const char *dbg_device_type_name[]={"", "<unknown>", "SGS01"};
+static const char *dbg_device_type_name[]={"", "<unknown>", "SGS01", "SGS01B"};
 #endif
 
 //
@@ -93,7 +96,7 @@ static inline void app_sec_time_update(void)
 		app_sec_time_tick+=CLOCK_16M_SYS_TIMER_CLK_1S;
 		app_sec_time_cnt++;
 		#if (APP_SECTIMER_DEBUG_EN)
-		putchar('S');
+		putchar('S'); app_debug_nextline();
 		#endif
 	}
 }
@@ -157,8 +160,9 @@ static _attribute_ram_code_ _attribute_no_inline_ int app_pm_suspend_enter_cb(vo
 //
 
 _attribute_data_retention_ u32 app_data_time_sec = 0;
+_attribute_data_retention_ u32 app_poll_time_sec = 0;
 
-static u8 app_set_state(u8 newstate)
+_attribute_optimize_size_ static u8 app_set_state(u8 newstate)
 {
 	if (newstate == APP_STATE_TOOGLE)
 	{
@@ -170,7 +174,17 @@ static u8 app_set_state(u8 newstate)
 		DEBUGSTR(APP_LOG_EN, "|APP] Switch to AppState measure");
 		app_ble_setup_adv(BLE_ADV_MODE_SensorData);
 		#if (APP_MCU_SERIAL)
-		app_serial_cmd_seq_start(MCU_CMD_SEQ_START_MEASURE, 60000);
+		u16 mcupollinterval=app_config_get_mcupollinterval();
+		if (mcupollinterval==0)
+		{
+			app_serial_cmd_seq_start(MCU_CMD_SEQ_START_MEASURE, 60000);
+		}
+		else
+		{
+			app_serial_cmd_seq_start(MCU_CMD_SEQ_START_POLL, 60000);
+			app_poll_time_sec = app_sec_time(); if (!app_poll_time_sec)   app_poll_time_sec=1;
+		}
+		app_data_time_sec = app_sec_time();
 		app_mcustate_time = app_sec_time();
 		#endif
 		app_state=APP_STATE_MEASURE; app_state_clock = app_sec_time();
@@ -183,6 +197,7 @@ static u8 app_set_state(u8 newstate)
 		#if (APP_MCU_SERIAL)
 		app_serial_cmd_seq_start(MCU_CMD_SEQ_START_CONNECT, 60000);
 		app_mcustate_time = app_sec_time();
+		app_poll_time_sec = 0;
 		#endif
 		app_state = APP_STATE_CONNPAIR; app_state_clock = app_sec_time();
 		return 1;
@@ -199,7 +214,7 @@ static u8 app_set_state(u8 newstate)
 	return 0;
 }
 
-static u8 app_handle_state()
+_attribute_optimize_size_ static u8 app_handle_state()
 {
 	#if (APP_MCU_SERIAL)
 	if (app_serial_cmd_seq_stat()!=0)
@@ -227,22 +242,40 @@ static u8 app_handle_state()
 		bool mcurefresh=app_sec_time_exceeds(app_mcustate_time, APP_MCU_STATE_REFRESH_SEC);
 		if (mcurefresh && !module_wakeup_status() && !app_serial_cmd_seq_stat())
 		{
-			app_set_state(APP_STATE_CONNPAIR); // refresh mcu state (keep LED blinking)
+			app_set_state(APP_STATE_CONNPAIR); // refresh MCU state (keep LED blinking)
 		}
 		#endif
 		return APP_PM_DISABLE_SLEEP;
 	}
 	if (app_state == APP_STATE_MEASURE)
 	{
-		#ifdef APP_MCU_DATA_TIMEOUT_SEC
 		#if (APP_MCU_SERIAL)
-		if (app_sec_time_exceeds(app_data_time_sec,APP_MCU_DATA_TIMEOUT_SEC))
-		{
-		    app_serial_cmd_seq_start(MCU_CMD_SEQ_START_MEASURE, 10); // query data
-			app_data_time_sec = app_sec_time();
-			return APP_PM_DISABLE_SLEEP;
+		u16 mcupollinterval=app_config_get_mcupollinterval();
+		if (mcupollinterval==0)
+		{   // simulate BLE bound+connected state, MCU notifies data changes
+			if (app_sec_time_exceeds(app_data_time_sec,APP_MCU_DATA_TIMEOUT_SEC))
+			{
+			    app_serial_cmd_seq_start(MCU_CMD_SEQ_START_MEASURE, 10); // set state + query data
+				app_data_time_sec = app_sec_time();
+				return APP_PM_DISABLE_SLEEP;
+			}
 		}
-		#endif
+		else
+		{   // simulate BLE bound state and periodic connects to read MCU data
+			if (!app_poll_time_sec && app_sec_time_exceeds(app_data_time_sec,mcupollinterval))
+			{
+				app_serial_cmd_seq_start(MCU_CMD_SEQ_START_POLL, 10);
+				app_data_time_sec = app_sec_time();
+				app_poll_time_sec = app_sec_time();
+				return APP_PM_DISABLE_SLEEP;
+			}
+			if (app_poll_time_sec && app_sec_time_exceeds(app_poll_time_sec,APP_MCU_POLL_TIME_SEC))
+			{
+				app_serial_cmd_seq_start(MCU_CMD_SEQ_END_POLL, 10);
+				app_poll_time_sec = 0;
+				return APP_PM_DISABLE_SLEEP;
+			}
+		}
 		#endif
 	}
 	#if (APP_MCU_SERIAL)
@@ -250,7 +283,6 @@ static u8 app_handle_state()
 	#endif
 	return APP_PM_DEFAULT;
 }
-
 
 //
 // App interface
@@ -262,7 +294,7 @@ _attribute_no_inline_ void app_init_normal(void)
     // basic hardware
 	random_generator_init(); // mandatory, must be first
 	// debug init
-	app_debug_init();
+	app_debug_init(0);
 	#if (APP_LOG_EN)
 	static const char dbg_version[] = {VERSION_STR VERSION_STR_BUILD}; // app_config.h
 	DEBUGFMT(APP_LOG_EN, "-----------------");
@@ -287,6 +319,13 @@ _attribute_no_inline_ void app_init_normal(void)
 	app_ble_init_normal();
 	// MCU serial init
     #if (APP_MCU_SERIAL)
+	// rem.:
+	// the SGS01/SGS01-A uses a BT3L module and a serial baudrate 9600
+	// the new SGS01B uses a BTU module and a serial baudrate 115200
+	//TODO may find a way to auto detect the BTU module (flash content/pin reading/baudrate detection)
+	//TODO to get one firmware for all versions
+	//
+	// app_serial_set_baudrate(115200);
 	app_serial_init_normal();
     #endif
 	// Power management
@@ -309,7 +348,7 @@ _attribute_no_inline_ void app_init_normal(void)
 		DEBUGFMT(APP_LOG_EN, "[APP] INIT ERROR 0x%04x, 0x%04x", error_controller, error_host);
 		while(1);
 	}
-    DEBUGSTR(APP_LOG_EN, "|APP] Init end");
+    DEBUGSTR(APP_LOG_EN, "[APP] Init end");
     // start
 	#if (APP_MCU_SERIAL)
     app_state = APP_STATE_INIT; app_state_clock=0;
@@ -323,21 +362,24 @@ _attribute_no_inline_ void app_init_normal(void)
 // initialization when wake up from deepSleep_retention mode (called from main.c)
 _attribute_ram_code_ void app_init_deepRetn(void)
 {
-	// basic
+	// Basic
 	blc_app_loadCustomizedParameters_deepRetn();
 	blc_ll_initBasicMCU(); // mandatory
 	blc_ll_recoverDeepRetention();
+	// Debug
+	app_debug_init(1);
+	app_sec_time_update();
+	// MCU PadWakeup
 	#if (APP_MCU_SERIAL)
 	mcu_wakeup_init_deepRetn();
 	#endif
-	// debug
-	app_debug_init();
-	DEBUGFMT(APP_PM_LOG_EN, "|APP] Init deepRetn %u sec", app_sec_time_cnt);
+	// PM log
+	DEBUGFMT(APP_PM_LOG_EN, "[APP] Init deepRetn %u sec", app_sec_time_cnt);
 	// Flash
 	app_flash_init_deepRetn();
 	// BLE
 	app_ble_init_deepRetn();
-	// MCU serial (first - BLE takes some time)
+	// MCU Serial
     #if (APP_MCU_SERIAL)
 	app_serial_init_deepRetn();
     #endif
@@ -408,6 +450,8 @@ static void app_handle_user_button(int val)
 //
 
 static const u8 pid_sgs01[8]={'g','v','y','g','g','3','m','8'};
+// rem.: thanks to Tobias Perschon / new SGS01B pid
+static const u8 pid_sgs01b[8]={'g','p','k','y','r','o','c','n'};
 
 enum {
 	DPTYPE_RAW=0,		// datalen 1...255
@@ -481,11 +525,12 @@ static void set_dp_data(const dp_def_t *dpdef, const u8 *data, u16 datalen)
 }
 
 #if (APP_DPDATA_LOG_EN)
-static void DEBUG_DPDATA(const u8 *data, u16 datalen)
+static void DEBUG_DPDATA(const u8 *data, u16 datalen, u8 status)
 {
+	const char *dbg_type=(status ? "DP Stat:" : "DP Data:");
 	if (datalen > 1)
 	{
-		DEBUGFMT(APP_DPDATA_LOG_EN, "|APP] DP Data: flags=%02X", *data);
+		DEBUGFMT(APP_DPDATA_LOG_EN, "|APP] %s flags=%02X", dbg_type, *data);
 		data++; datalen--;
 	}
 	while (datalen>=3)
@@ -494,7 +539,7 @@ static void DEBUG_DPDATA(const u8 *data, u16 datalen)
 		data+=sizeof(dp_header_t); datalen-=sizeof(dp_header_t);
 		const u8 *dpdata=data; u16 dplen=hdr->dplen_h; dplen<<=8; dplen|=hdr->dplen_l;	if (dplen>datalen)   break;
         data+=dplen; datalen-=dplen;
-    	DEBUGFMT(APP_DPDATA_LOG_EN,    "|APP] DP Data: dpid=%02X, dptype=%02X, dplen=%u", hdr->dpid, hdr->dptype, dplen);
+    	DEBUGFMT(APP_DPDATA_LOG_EN,    "|APP] %s dpid=%02X, dptype=%02X, dplen=%u", dbg_type, hdr->dpid, hdr->dptype, dplen);
     	DEBUGHEXBUF(APP_DPDATA_LOG_EN, "|APP]          data=%s", dpdata, dplen);
 	}
 }
@@ -508,16 +553,18 @@ void app_notify(u8 evt, const u8 *data, u16 datalen)
 		case APP_NOTIFY_PRODUCTID:
 		{
 			u8 device_type=DEVICETYPE_Unknown;
-			if (memcmp(data,pid_sgs01,8) == 0)	device_type=DEVICETYPE_SGS01;
+			if (memcmp(data,pid_sgs01,8) == 0)        device_type=DEVICETYPE_SGS01;
+			else if (memcmp(data,pid_sgs01b,8) == 0)  device_type=DEVICETYPE_SGS01B;
 		    DEBUGFMT(APP_LOG_EN, "|APP] Device type %s", dbg_device_type_name[device_type]);
-		    if (device_type==DEVICETYPE_SGS01)   app_ble_init_device_name("SGS01");
+		    if (device_type!=DEVICETYPE_Unknown)   app_ble_init_device_name("SGS01");
 			app_device_type=device_type;
 		} break;
-		case APP_NOTIFY_DPDATA:
+		case APP_NOTIFY_DPDATA: // status queried by Module
+		case APP_NOTIFY_DPDATA_REPORT: // triggered by MCU
 			#if (APP_DPDATA_LOG_EN)
-			DEBUG_DPDATA(data, datalen);
+			DEBUG_DPDATA(data, datalen, (evt==APP_NOTIFY_DPDATA?1:0) );
 			#endif
-			if (app_device_type == DEVICETYPE_SGS01)
+			if (app_device_type == DEVICETYPE_SGS01 || app_device_type == DEVICETYPE_SGS01B)
 				set_dp_data(sgs01_dp_def, data, datalen);
 			app_data_time_sec=app_sec_time();
 		    break;
@@ -547,7 +594,7 @@ void app_notify(u8 evt, const u8 *data, u16 datalen)
 			if (!data)   return;
 			u8 state_new=data[0], state_old=data[1];
 		    if (app_state == APP_STATE_CONNPAIR && state_new==0 && state_old!=0)
-		    	app_state_clock = app_sec_time(); // hold conn state on disconnect
+		    	app_state_clock = app_sec_time(); // hold connection state on disconnect
 		} break;
 		case APP_NOTIFY_BUTTONPRESS:
 		    DEBUGSTR(APP_LOG_EN, "|APP] Button press");

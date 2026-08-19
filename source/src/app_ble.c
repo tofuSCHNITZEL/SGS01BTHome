@@ -224,7 +224,7 @@ _attribute_optimize_size_ static void ble_setup_adv_localname(const char* devnam
 		len=adv[u++]; if (len==0)   return;
 		type=adv[u]; if (type == DT_COMPLETE_LOCAL_NAME)   break;
 	}
-	for (n=u+1; n<6+1 && devname; n++)
+	for (n=u+1; n<u+1+6 && devname; n++)
 	{
 		char c=*devname;
 		if (c)   devname++;

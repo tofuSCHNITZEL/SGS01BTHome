@@ -54,6 +54,7 @@
 // the user can set MCU poll mode by BLE attribute
 //  att value=0: simulate BLE bound+connected state, MCU notifies data changes (default, tested)
 //  att value>0: simulate BLE bound state and periodic BLE connects to read MCU data (interval time 30-3600 seconds)
+// #define APP_MCU_POLLINTERVAL_DEFAULT   5*60 // seconds (0=none/keep in connected mode)
 
 // RF Power Level
 #define RF_POWER_LEVEL_DEFAULT 3 // dbm
@@ -76,6 +77,7 @@
 #endif
 #if (APP_DEBUG_ENABLE)
 #define APP_LOG_EN							1
+#define APP_LOG_TIMESTAMP_MS				1  // log with timestamp in milliseconds
 #define APP_PM_LOG_EN						0  // power management
 #define APP_BLE_LOG_EN						1  // BLE
 #define APP_FLASH_LOG_EN					1
@@ -112,9 +114,11 @@
 // UART Serial
 #define UART_TX_PIN		UART_TX_PB1
 #define UART_RX_PIN		UART_RX_PB7
-// rem.: thanks to Tobias Perschon
-// new SGS01B BTU module uses baudrate 115200
-#define UART_BAUDRATE	9600 // default
+// rem.: thanks to Tobias Perschon / new SGS01B BTU module uses baudrate 115200
+// #define UART_BAUDRATE	9600   // SGS01
+// #define UART_BAUDRATE	115200 // SGS01B
+#define UART_BAUDRATE	0 // auto detect once at first power on
+#define UART_RX_USE_BUFFER  1 // use a rx buffer to extend the hardware 8 byte fifo (handled by IRQ)
 
 // Idle/WakeUp Pins
 #define MODULE_WAKEUP_PIN	GPIO_PB5 // high to wake up module to receive notifications

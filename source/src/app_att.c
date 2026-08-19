@@ -42,6 +42,9 @@
 #ifndef APP_MCU_POLL_ENABLE
 #define APP_MCU_POLL_ENABLE 0
 #endif
+#ifndef UART_BAUDRATE
+#define UART_BAUDRATE 0
+#endif
 
 // helpers
 _attribute_optimize_size_ static u8 hex_add(char *buf, u8 val)
@@ -302,9 +305,9 @@ static void app_ble_att_setup_serial(void)
 	s+=hex_add(s, (u8)(mid));
 	*s='-'; s++;
 	// Flash UID
-	u8 u, buf[22]; memset(buf, '0', 7);
+	u8 u, buf[22]; memset(buf, ' ', 7);
 	flash_read_uid(FLASH_READ_UID_CMD_GD_PUYA_ZB_TH, buf);
-	for (u=0; u<7 && buf[u]>' '; u++) { *s=buf[u]; s++; }
+	for (u=0; u<7 && buf[u]>' ' && buf[u]<0x80; u++) { *s=buf[u]; s++; }
 	#if (APP_ATT_LOG_EN)
 	memcpy(buf, att_SerialStr_val, 21); buf[21]=0;
     DEBUGFMT(APP_ATT_LOG_EN, "[ATT] Setup serial %s", buf);
@@ -475,6 +478,7 @@ static int customConfigWriteCB(void *p)
 	if (att == CustomConfig_Pincode_DP_H)
 	{
 		if (len != 4)   return 0x0D; // "invalid attribute length"
+//TODO may check pincode - needs 6 digits w/o trailing zero
 		u32 pin_old=get_u32(att_customPincode_val), pin_new=get_u32(data);
 	    DEBUGFMT(APP_ATT_LOG_EN, "[ATT] Write Pincode %u (%u)", pin_new, pin_old);
 	    userActionCB(p); // reset connection timeout

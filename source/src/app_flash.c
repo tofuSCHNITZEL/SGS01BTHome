@@ -198,6 +198,7 @@ typedef struct _attribute_packed_ _appconfig_v2_t {
 	u8  reserved2;
 	u16 mcupollinterval;
 	u16 reserved3;
+	u32 mcubaudrate;
 } appconfig_v2_t;
 
 #define appconfig_t appconfig_v2_t
@@ -308,6 +309,7 @@ void app_config_init(void)
     DEBUGFMT(APP_FLASH_LOG_EN, "[FLS] Cfg: mode %u (0x%02X)", app_config_get_mode(), app_config.mode);
     DEBUGFMT(APP_FLASH_LOG_EN, "[FLS] Cfg: format %u (0x%02X)", app_config_get_dataformat(), app_config.dataformat);
     DEBUGFMT(APP_FLASH_LOG_EN, "[FLS] Cfg: mcupoll %u (0x%02X)", app_config_get_mcupollinterval(), app_config.mcupollinterval);
+    DEBUGFMT(APP_FLASH_LOG_EN, "[FLS] Cfg: mcubaudrate %u (0x%08X)", app_config_get_mcubaudrate(), app_config.mcubaudrate);
 	#endif
 }
 
@@ -437,7 +439,11 @@ u16 app_config_get_mcupollinterval(void)
 {
     #if (APP_MCU_POLL_ENABLE)
 	u16 pollinterval=app_config.mcupollinterval;
+    #ifdef APP_MCU_POLLINTERVAL_DEFAULT
+	if (pollinterval == APP_CFG_DEFAULT_U16)   return APP_MCU_POLLINTERVAL_DEFAULT; // app_config.h
+    #else
 	if (pollinterval == APP_CFG_DEFAULT_U16)   return MCUPOLLINTERVAL_DEFAULT;
+    #endif
 	if (pollinterval>0 && pollinterval<30)  pollinterval=30;
 	else if (pollinterval>3600)             pollinterval=3600;
 	return pollinterval;
@@ -450,6 +456,19 @@ void app_config_set_mcupollinterval(u16 pollinterval)
 {
 	config_set_val((u8*)&app_config.mcupollinterval, (u8*)&pollinterval, 2);
 }
+
+u32 app_config_get_mcubaudrate(void)
+{
+	u32 baud=app_config.mcubaudrate;
+	if (baud == APP_CFG_DEFAULT_U32)   return MCUBAUDRATE_DEFAULT;
+	return baud;
+}
+
+void app_config_set_mcubaudrate(u32 baud)
+{
+	config_set_val((u8*)&app_config.mcubaudrate, (u8*)&baud, 4);
+}
+
 
 
 

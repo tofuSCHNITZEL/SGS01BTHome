@@ -73,6 +73,8 @@ static _attribute_data_retention_ u8 app_device_type = DEVICETYPE_None;
 static const char *dbg_device_type_name[]={"", "<unknown>", "SGS01", "SGS01B"};
 #endif
 
+static _attribute_data_retention_ u8 app_measure_battery_enable=1;
+
 //
 // One second timer (for longer intervals)
 //
@@ -169,6 +171,19 @@ _attribute_optimize_size_ static u8 app_set_state(u8 newstate)
 		if (app_state == APP_STATE_CONNPAIR)		newstate = APP_STATE_MEASURE;
 		else if (app_state == APP_STATE_MEASURE)	newstate = APP_STATE_CONNPAIR;
 	}
+	if (newstate == APP_STATE_INIT && app_state != APP_STATE_INIT)
+	{
+		#if (APP_MCU_SERIAL)
+		app_state = APP_STATE_INIT; app_state_clock=0;
+		DBGSETTRACESTATE(0,'I');
+		// app_serial_cmd_seq_start(MCU_CMD_SEQ_INIT, 300000); // delay 300ms
+		app_serial_cmd_seq_start(MCU_CMD_SEQ_INIT, 2000000); // delay 2s ? the SGS01B MCU has a boot latency time of 1.4 sec ?
+		#else
+		app_state = APP_STATE_CONNPAIR; app_state_clock=clock_time();
+		DBGSETTRACESTATE(0,'C');
+		#endif
+		return 1;
+	}
 	if (newstate == APP_STATE_MEASURE || (newstate == APP_STATE_NONE && app_state == APP_STATE_CONNPAIR))
 	{
 		DEBUGSTR(APP_LOG_EN, "|APP] Switch to AppState measure");
@@ -188,6 +203,7 @@ _attribute_optimize_size_ static u8 app_set_state(u8 newstate)
 		app_mcustate_time = app_sec_time();
 		#endif
 		app_state=APP_STATE_MEASURE; app_state_clock = app_sec_time();
+		DBGSETTRACESTATE(0,'M');
 		return 1;
 	}
 	if (newstate == APP_STATE_CONNPAIR && app_state != APP_STATE_CONNPAIR)
@@ -200,6 +216,7 @@ _attribute_optimize_size_ static u8 app_set_state(u8 newstate)
 		app_poll_time_sec = 0;
 		#endif
 		app_state = APP_STATE_CONNPAIR; app_state_clock = app_sec_time();
+		DBGSETTRACESTATE(0,'C');
 		return 1;
 	}
 	if (newstate == APP_STATE_CONNPAIR && app_state == APP_STATE_CONNPAIR)
@@ -285,16 +302,47 @@ _attribute_optimize_size_ static u8 app_handle_state()
 }
 
 //
+// App detect MCU baudrate once and store it in flash mem
+//
+
+void app_detect_baudrate(void)
+{
+	#if (APP_MCU_SERIAL)
+	u32 baud=UART_BAUDRATE;
+	if (baud == 0)
+	{
+		baud=app_config_get_mcubaudrate();
+		if (baud!=0)   DEBUGFMT(APP_LOG_EN, "|APP] MCU baudrate %u from flash config", baud);
+	}
+	if (baud == 0)
+	{
+		DEBUGSTR(APP_LOG_EN, "|APP] Detect MCU baudrate");
+		baud=mcu_detect_baudrate();
+		if (!baud)   DEBUGSTR(APP_LOG_EN, "|APP] FAILED to detect baudrate");
+		if (baud != 0)
+		{
+			DEBUGFMT(APP_LOG_EN, "|APP] Found MCU baudrate %u", baud);
+			app_config_set_mcubaudrate(baud);
+			app_config_flush();
+		}
+	}
+	if (baud!=0)
+		app_serial_set_baudrate(baud);
+	#endif
+}
+
+//
 // App interface
 //
 
 // initialization when power on or wake up from DeepSleep (called from main.c)
 _attribute_no_inline_ void app_init_normal(void)
 {
-    // basic hardware
+    // Basic hardware
 	random_generator_init(); // mandatory, must be first
-	// debug init
+	// Debug init
 	app_debug_init(0);
+	DBGSETTRACESTATE(0,'X'); // log the app state as first char after timestamp
 	#if (APP_LOG_EN)
 	static const char dbg_version[] = {VERSION_STR VERSION_STR_BUILD}; // app_config.h
 	DEBUGFMT(APP_LOG_EN, "-----------------");
@@ -304,28 +352,25 @@ _attribute_no_inline_ void app_init_normal(void)
 	#if (APP_PM_LOG_EN)
     app_pm_stat_work();
 	#endif
-    // some short delay from MCU startup and show led on
-    u32 init_delay=clock_time();
-	while (!clock_time_exceed(init_delay,100000)) ;
 	// Flash init, load calibration
 	app_flash_init_normal();
+    // Some short delay from MCU startup and show led on
+    u32 init_delay=clock_time();
+	while (!clock_time_exceed(init_delay,100000)) ;
 	// Battery init and check
 	#if (APP_BATTERY_CHECK)
 	app_battery_init_normal();
     #endif
 	// Read app config from flash (must: after battery check)
 	app_config_init();
+	// Detect MCU baudrate once
+	#if (APP_MCU_SERIAL)
+	app_detect_baudrate();
+	#endif
 	// BLE init (must: after battery check)
 	app_ble_init_normal();
 	// MCU serial init
     #if (APP_MCU_SERIAL)
-	// rem.:
-	// the SGS01/SGS01-A uses a BT3L module and a serial baudrate 9600
-	// the new SGS01B uses a BTU module and a serial baudrate 115200
-	//TODO may find a way to auto detect the BTU module (flash content/pin reading/baudrate detection)
-	//TODO to get one firmware for all versions
-	//
-	// app_serial_set_baudrate(115200);
 	app_serial_init_normal();
     #endif
 	// Power management
@@ -350,13 +395,9 @@ _attribute_no_inline_ void app_init_normal(void)
 	}
     DEBUGSTR(APP_LOG_EN, "[APP] Init end");
     // start
-	#if (APP_MCU_SERIAL)
-    app_state = APP_STATE_INIT; app_state_clock=0;
-    app_serial_cmd_seq_start(MCU_CMD_SEQ_INIT, 300000); // delay 300ms
-	#else
-    app_state = APP_STATE_CONNPAIR; app_state_clock=clock_time();
-	#endif
 	irq_enable();
+	app_state = APP_STATE_NONE;
+	app_set_state(APP_STATE_INIT);
 }
 
 // initialization when wake up from deepSleep_retention mode (called from main.c)
@@ -406,7 +447,7 @@ _attribute_no_inline_ void app_main_loop(void)
 	// component loops
 	//   battery
 	#if (APP_BATTERY_CHECK)
-	pm_flags|=app_battery_loop();
+	if (app_measure_battery_enable)  pm_flags|=app_battery_loop();
 	#endif
 	//   BLE
 	pm_flags|=app_ble_loop();
@@ -429,6 +470,13 @@ _attribute_no_inline_ void app_main_loop(void)
  	if (!rxtx_busy)   app_config_flush();
 }
 
+_attribute_ram_code_ inline u8 app_irq_handler(void)
+{
+    #if (APP_MCU_SERIAL)
+	if (app_serial_irq_handler())   return 1;
+    #endif
+	return 0;
+}
 
 //
 // button handler
@@ -453,6 +501,8 @@ static const u8 pid_sgs01[8]={'g','v','y','g','g','3','m','8'};
 // rem.: thanks to Tobias Perschon / new SGS01B pid
 static const u8 pid_sgs01b[8]={'g','p','k','y','r','o','c','n'};
 
+static const u8 init_dpdata_sgs01[]={9,4,0,1,0}; // set DP Temperature Unit to °C
+
 enum {
 	DPTYPE_RAW=0,		// datalen 1...255
 	DPTYPE_BOOL=1,		// datalen 1
@@ -462,16 +512,16 @@ enum {
 };
 typedef struct _attribute_packed_ { u8 dpid; u8 dptype; u8 vt_bthome; u8 digits; } dp_def_t;
 
-#define VT_USER        0xF0
-#define VT_USER_BUTTON 0xFE // special button handler
+#define VT_USER          0xF0
+#define VT_USER_UNIT2BTN 0xFE // special button handler
 
 // Tuya DP to BTHome data definitions
 static const dp_def_t sgs01_dp_def[]= { // SGS01 Tuya data points -> BTHome data
 	{3,  2, VT_MOISTURE, 0 },			// Soil Moisture: 1%
 	{5,  2, VT_TEMPERATURE, 1 },		// Temperature: 0.1 °C
 //	{6,  4, VT_xxx, 0 },				// ?: values 0
-//	{9,  4, VT_xxx, 0 }, 				// Temperature Unit: 0=°C, 1=°F
-	{9,  4, VT_USER_BUTTON, 0 },		// supposing: short button press will change temp unit
+//	{9,  4, VT_xxx, 0 }, 				// Temperature Unit: 0=°C, 1=°F (value type enum)
+	{9,  4, VT_USER_UNIT2BTN, 0 },		// SGS01: short button press will change temp unit
 //	{14, 4, VT_xxx, 0 },				// ? values:2
 	{15, 2, VT_BATTERY_PERCENT, 0 },	// Battery Level: 1%
 	{0, 0, 0, 0}
@@ -515,7 +565,7 @@ static void set_dp_data(const dp_def_t *dpdef, const u8 *data, u16 datalen)
             int ret = 0, val = get_val_be(dpdata, dplen);
             if (vtype < VT_USER)
 			   ret = app_ble_set_sensor_data(dpdef[u].vt_bthome, val, dpdef[u].digits);
-            else if (vtype == VT_USER_BUTTON)
+            else if (vtype == VT_USER_UNIT2BTN)
                app_handle_user_button(val);
             if (vtype == VT_BATTERY_PERCENT && ret > 0)
             	app_battery_check_delayed(); // BatteryLevel changed: measure battery voltage
@@ -545,6 +595,17 @@ static void DEBUG_DPDATA(const u8 *data, u16 datalen, u8 status)
 }
 #endif
 
+static void factory_reset(void)
+{
+    DEBUGSTR(APP_LOG_EN, "|APP] Factory Reset");
+	app_ble_device_disconnect();
+	app_config_reset(); // first
+	#if (APP_BLE_ATT)
+	app_ble_att_setup_config(); // set new config values
+	#endif
+	app_ble_delete_bond();
+	app_set_state(APP_STATE_INIT);
+}
 
 void app_notify(u8 evt, const u8 *data, u16 datalen)
 {
@@ -556,7 +617,10 @@ void app_notify(u8 evt, const u8 *data, u16 datalen)
 			if (memcmp(data,pid_sgs01,8) == 0)        device_type=DEVICETYPE_SGS01;
 			else if (memcmp(data,pid_sgs01b,8) == 0)  device_type=DEVICETYPE_SGS01B;
 		    DEBUGFMT(APP_LOG_EN, "|APP] Device type %s", dbg_device_type_name[device_type]);
-		    if (device_type!=DEVICETYPE_Unknown)   app_ble_init_device_name("SGS01");
+		    if (device_type==DEVICETYPE_SGS01)    app_serial_cmd_seq_enable_reportstatus(1); // protocol features
+		    if (device_type==DEVICETYPE_SGS01)    app_ble_init_device_name("SGS01"); // BLE device name
+		    if (device_type==DEVICETYPE_SGS01B)   app_measure_battery_enable=0; // no battery voltage data
+		    if (device_type==DEVICETYPE_SGS01B)   app_ble_init_device_name("SGS01b"); // BLE device name
 			app_device_type=device_type;
 		} break;
 		case APP_NOTIFY_DPDATA: // status queried by Module
@@ -569,21 +633,23 @@ void app_notify(u8 evt, const u8 *data, u16 datalen)
 			app_data_time_sec=app_sec_time();
 		    break;
 		case APP_NOTIFY_BATTERYVOLTAGE: // data: u16 (mV)
-			app_ble_set_sensor_data(VT_VOLTAGE, *(const u16 *)data, 3);
+            // SGS01: the BT3L module is connected to battery voltage
+            // SGS01B: the BTU module is connected to a 2.5V voltage regulator (the is no direct way to measure the battery)
+			if (app_device_type==DEVICETYPE_SGS01)
+				app_ble_set_sensor_data(VT_VOLTAGE, *(const u16 *)data, 3);
 			break;
 		case APP_NOTIFY_BATTERYLOW:
 			app_ble_set_sensor_data(VT_BATTERY_PERCENT, 0, 0); // report bat level 0%
 			app_ble_set_sensor_data(VT_BINARY_BATTERY, 1, 0); // report low bat
 			break;
 		case APP_NOTIFY_FACTORYRESET:
-		    DEBUGSTR(APP_LOG_EN, "|APP] Factory Reset");
-			app_ble_device_disconnect();
-			app_config_reset(); // first
-			#if (APP_BLE_ATT)
-			app_ble_att_setup_config(); // set new config values
-			#endif
-			app_ble_delete_bond();
-		    app_state = APP_STATE_INIT; app_state_clock=0;
+			// SGS01: send reset the on a long press button and toogles temp.unikt on a short pressed button
+			// SGS01B: send reset too on CMD_SendModuleStatus idle
+			if (app_serial_module_status()==0xFF)   break; // unknown/not set
+			if (app_device_type == DEVICETYPE_SGS01)
+				factory_reset();
+			if (app_device_type == DEVICETYPE_SGS01B && app_serial_module_status()!=0)
+				factory_reset();
 			break;
 		case APP_NOTIFY_REBOOT:
 		    DEBUGSTR(APP_LOG_EN, "|APP] Reboot");

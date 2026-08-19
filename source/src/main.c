@@ -34,6 +34,8 @@
 // IRQ handler
 _attribute_ram_code_ void irq_handler(void)
 {
+	// App
+	if (app_irq_handler())   return;
 	// SDK IRQ handler
 	irq_blt_sdk_handler();
 }

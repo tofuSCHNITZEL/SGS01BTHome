@@ -4,9 +4,9 @@
  * @brief   Debug helpers (using Telink SDK)
  *
  * @author  haraldapp
- * @date    06,2024
+ * @date    08,2026
  *
- * @par     Copyright (c) 2024, haraldapp, https://github.com/haraldapp
+ * @par     Copyright (c) 2024-2026, haraldapp, https://github.com/haraldapp
  *
  *          Licensed under the Apache License, Version 2.0 (the "License");
  *          you may not use this file except in compliance with the License.
@@ -46,8 +46,6 @@
 #if (APP_DEBUG_ENABLE)
 _attribute_data_retention_ u8 app_dbg_newline = 0;
 _attribute_data_retention_ char app_dbg_tstate[2] = {0,0};
-#if (APP_LOG_TIMESTAMP_MS)
-#endif
 
 void DBGBRK(void)
 {
@@ -117,6 +115,7 @@ void DEBUGOUTINT(int val, int digits)
 	}
 	while (ofs<sizeof(buf))   DEBUGOUT(buf[ofs++]);
 }
+
 #endif
 
 

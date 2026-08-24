@@ -4,9 +4,9 @@
  * @brief   Project configuration
  *
  * @author  haraldapp
- * @date    03,2025
+ * @date    08,2026
  *
- * @par     Copyright (c) 2025, haraldapp, https://github.com/haraldapp
+ * @par     Copyright (c) 2025-2026, haraldapp, https://github.com/haraldapp
  *
  *          Licensed under the Apache License, Version 2.0 (the "License");
  *          you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@
 #ifndef __APP_CONFIG_H__INCLUDED__
 #define __APP_CONFIG_H__INCLUDED__
 
-#define VERSION_STR "V1.1Pre"
+#define VERSION_STR "V1.1Pre2"
 
 #if defined(APP_DEBUG_ENABLE) && (APP_DEBUG_ENABLE)
 #define VERSION_STR_BUILD "Debug"
@@ -81,7 +81,7 @@
 #define APP_PM_LOG_EN						0  // power management
 #define APP_BLE_LOG_EN						1  // BLE
 #define APP_FLASH_LOG_EN					1
-#define APP_FLASH_DEBUG_EN					1
+#define APP_FLASH_DEBUG_EN					0
 #define APP_FLASH_PROT_LOG_EN				0
 #define APP_ATT_LOG_EN						1  // BLE GAP/GATT attributes
 #define APP_SMP_LOG_EN						1  // BLE security manager
@@ -90,8 +90,9 @@
 #define APP_HOST_EVENT_LOG_EN				1  // host event log
 #define APP_OTA_LOG_EN						1
 #define APP_BATTERY_CHECK_LOG_EN			1
+#define APP_BATTERY_CHECK_DEBUG_EN			0
 #define APP_SERIAL_LOG_EN					1
-#define APP_SERIAL_DEBUG_EN					1
+#define APP_SERIAL_DEBUG_EN					0
 #define APP_BTHOME_LOG_EN					1
 #define APP_DPDATA_LOG_EN					0
 #define APP_SECTIMER_DEBUG_EN				1
@@ -104,8 +105,8 @@
 #endif
 
 // battery check
-#define GPIO_VBAT_DETECT				GPIO_PB4 // TL825x: GPIO pin needed to check supply voltage
-#define ADC_INPUT_PCHN 					B4P		 // corresponding ADC_InputPchTypeDef
+#define APP_SUPPLYVOLTAGE_PIN			GPIO_PB3 // TL825x: GPIO pin needed to check supply voltage
+#define APP_BATTERY_PIN_OPT				GPIO_PB4 // SGS01B only - pin for battery voltage check, extra wire required to read battery voltage (PB0-PB7,PC4,PC5 pins only)
 #define APP_BATTERY_LOW_MV				2600 // low battery voltage mV
 #define APP_BATTERY_CRITICAL_MV			2200 // critical battery voltage mV
 #define APP_BATTERY_CHECK_INTERVAL_SEC  300  // 5 minutes

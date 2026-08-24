@@ -4,9 +4,9 @@
  * @brief   Project header file
  *
  * @author  haraldapp
- * @date    05,2025
+ * @date    08,2026
  *
- * @par     Copyright (c) 2025, haraldapp, https://github.com/haraldapp
+ * @par     Copyright (c) 2025-2026, haraldapp, https://github.com/haraldapp
  *
  *          Licensed under the Apache License, Version 2.0 (the "License");
  *          you may not use this file except in compliance with the License.
@@ -147,8 +147,11 @@ void app_config_set_mcubaudrate(u32 baud);
 void app_battery_init_normal(void);
 _attribute_ram_code_ void app_battery_init_deepRetn(void);
 u8 app_battery_loop(void);
-int app_battery_check(u16 alarm_voltage_mv);
+int app_supply_voltage_check(u16 alarm_voltage_mv);
 void app_battery_check_delayed(void);
+enum { APP_BATTERY_BATPIN_GPIO_max=0x0600, APP_BATTERY_BATPIN_Supply=0xFFFE, APP_BATTERY_BATPIN_None=0xFFFF };
+void app_battery_set_batpin(u16 batpin);
+
 #endif
 
 // app_ble.c

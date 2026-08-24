@@ -4,9 +4,9 @@
  * @brief   Main entry point
  *
  * @author  haraldapp
- * @date    01,2025
+ * @date    08,2026
  *
- * @par     Copyright (c) 2025, haraldapp, https://github.com/haraldapp
+ * @par     Copyright (c) 2025-2026, haraldapp, https://github.com/haraldapp
  *
  *          Licensed under the Apache License, Version 2.0 (the "License");
  *          you may not use this file except in compliance with the License.
@@ -44,6 +44,10 @@
 
 #ifndef APP_MCU_POLL_ENABLE
 #define APP_MCU_POLL_ENABLE 0
+#endif
+
+#ifndef APP_BATTERY_PIN_OPT
+#define APP_BATTERY_PIN_OPT APP_BATTERY_BATPIN_None
 #endif
 
 // BLE stack RX/TX FIFO (must)
@@ -617,10 +621,11 @@ void app_notify(u8 evt, const u8 *data, u16 datalen)
 			if (memcmp(data,pid_sgs01,8) == 0)        device_type=DEVICETYPE_SGS01;
 			else if (memcmp(data,pid_sgs01b,8) == 0)  device_type=DEVICETYPE_SGS01B;
 		    DEBUGFMT(APP_LOG_EN, "|APP] Device type %s", dbg_device_type_name[device_type]);
-		    if (device_type==DEVICETYPE_SGS01)    app_serial_cmd_seq_enable_reportstatus(1); // protocol features
 		    if (device_type==DEVICETYPE_SGS01)    app_ble_init_device_name("SGS01"); // BLE device name
-		    if (device_type==DEVICETYPE_SGS01B)   app_measure_battery_enable=0; // no battery voltage data
+		    if (device_type==DEVICETYPE_SGS01)    app_serial_cmd_seq_enable_reportstatus(1); // protocol features
+		    if (device_type==DEVICETYPE_SGS01)    app_battery_set_batpin(APP_BATTERY_BATPIN_Supply);
 		    if (device_type==DEVICETYPE_SGS01B)   app_ble_init_device_name("SGS01b"); // BLE device name
+		    if (device_type==DEVICETYPE_SGS01B)   app_battery_set_batpin(APP_BATTERY_PIN_OPT);
 			app_device_type=device_type;
 		} break;
 		case APP_NOTIFY_DPDATA: // status queried by Module
@@ -635,7 +640,7 @@ void app_notify(u8 evt, const u8 *data, u16 datalen)
 		case APP_NOTIFY_BATTERYVOLTAGE: // data: u16 (mV)
             // SGS01: the BT3L module is connected to battery voltage
             // SGS01B: the BTU module is connected to a 2.5V voltage regulator (the is no direct way to measure the battery)
-			if (app_device_type==DEVICETYPE_SGS01)
+			if (app_device_type!=DEVICETYPE_Unknown)
 				app_ble_set_sensor_data(VT_VOLTAGE, *(const u16 *)data, 3);
 			break;
 		case APP_NOTIFY_BATTERYLOW:
@@ -643,8 +648,9 @@ void app_notify(u8 evt, const u8 *data, u16 datalen)
 			app_ble_set_sensor_data(VT_BINARY_BATTERY, 1, 0); // report low bat
 			break;
 		case APP_NOTIFY_FACTORYRESET:
-			// SGS01: send reset the on a long press button and toogles temp.unikt on a short pressed button
+			// SGS01: send reset the on a long press button and toogles temp.unit on a short pressed button
 			// SGS01B: send reset too on CMD_SendModuleStatus idle
+			// SGS01B: stops any button actions some minutes after power on (?)
 			if (app_serial_module_status()==0xFF)   break; // unknown/not set
 			if (app_device_type == DEVICETYPE_SGS01)
 				factory_reset();

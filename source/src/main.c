@@ -4,9 +4,9 @@
  * @brief   Main entry point
  *
  * @author  haraldapp
- * @date    12,2023
+ * @date    8,2026
  *
- * @par     Copyright (c) 2023, haraldapp, https://github.com/haraldapp
+ * @par     Copyright (c) 2023-2026, haraldapp, https://github.com/haraldapp
  *
  *          Licensed under the Apache License, Version 2.0 (the "License");
  *          you may not use this file except in compliance with the License.

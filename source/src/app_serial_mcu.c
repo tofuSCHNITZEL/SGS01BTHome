@@ -4,9 +4,9 @@
  * @brief   Third party MCU serial protocol
  *
  * @author  haraldapp
- * @date    03,2025
+ * @date    08,2026
  *
- * @par     Copyright (c) 2025, haraldapp, https://github.com/haraldapp
+ * @par     Copyright (c) 2025-2026, haraldapp, https://github.com/haraldapp
  *
  *          Licensed under the Apache License, Version 2.0 (the "License");
  *          you may not use this file except in compliance with the License.
@@ -1207,7 +1207,9 @@ static const char *cmd_seq_dbg[] = {"<none>", "init", "connect", "update", "meas
 _attribute_optimize_size_ void app_serial_cmd_seq_start(u8 cmd_seq, u32 delay)
 {
 	if (cmd_seq>=sizeof(cmd_seq_def)/sizeof(cmd_seq_def[0]))   return;
-	DEBUGFMT(APP_SERIAL_DEBUG_EN, "[MCU] Serial Start CmdSeq %u=%s delay %u", cmd_seq, cmd_seq_dbg[cmd_seq], delay);
+	#if (APP_SERIAL_DEBUG_EN)
+	DEBUGFMT(1, "[MCU] Serial Start CmdSeq %u=%s delay %u", cmd_seq, cmd_seq_dbg[cmd_seq], delay);
+	#endif
 	next_cmd_seq=cmd_seq_def[cmd_seq];
 	mcu_cmd_seq_start_clock=clock_time();
 	mcu_cmd_seq_start_delay=delay;

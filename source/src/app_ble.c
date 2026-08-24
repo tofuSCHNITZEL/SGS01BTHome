@@ -4,9 +4,9 @@
  * @brief   Bluetooth LE handler
  *
  * @author  haraldapp
- * @date    08,2024
+ * @date    08,2026
  *
- * @par     Copyright (c) 2024, haraldapp, https://github.com/haraldapp
+ * @par     Copyright (c) 2024-2026, haraldapp, https://github.com/haraldapp
  *
  *          Licensed under the Apache License, Version 2.0 (the "License");
  *          you may not use this file except in compliance with the License.
